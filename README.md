@@ -1,1 +1,1 @@
-MDAnalysis-based scripts to perform HDX analysis
+MDAnalysis & MDTraj based scripts to perform HDX analysis
