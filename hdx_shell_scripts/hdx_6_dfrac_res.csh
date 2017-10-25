@@ -19,9 +19,9 @@
 ###################
 
 # Set variables
-set dire = 6-d-fraction-hbonds        # where you put output
+set dire = 6-d-fraction                 # where you put output
 set sres = 1                            # first residue ID
-set fres = 512                            # last  residue ID
+set fres = 512                            # penultimate residue ID (last isn't calculated as C-terminal)
 
 # Make destination directory, if not exist
 if ( ! -e $dire ) then
@@ -41,9 +41,9 @@ while ( $i < $fres )
         goto nextres
     else if ( $test == 1 ) then # res$i is not PRO
         # get mean P-factor, remembering pf has redidue idxs, not IDs
-        set pf = `grep -v "#" ../4-p-factor-hbonds/pf_res$i.dat | awk '{sum+=$4}END{printf "%12.5f", sum/NR}'`
+        set pf = `grep -v "#" ../4-p-factor/pf_res$i.dat | awk '{sum+=$4}END{printf "%12.5f", sum/NR}'`
         # get pertinent intrinsic exchange rate, remembering k_iexr has residue IDs, not idxs
-        set kint = `awk '{if($1=='$i'+1) printf "%10.10f", $3}' ../5-kint-AAAref/k_iexr.dat`
+        set kint = `awk '{if($1=='$i'+1) printf "%10.10f", $3}' ../5-kint/k_iexr.dat`
         echo $i $kint $pf >> df_plot.dat
         foreach t ( 0 0.167 1 10 120 ) # time in min, MUST match experimental values!
             set df = `awk 'BEGIN{printf "%1.6f", 1-exp(-'$kint'/'$pf'*'$t')}'` # deuterium fraction

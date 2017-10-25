@@ -20,8 +20,8 @@
 
 # Set variables
 set dire = 6-d-fraction-orig        # where you put output
-set sres = 1                            # first residue ID
-set fres = 512                            # last  residue ID
+set sres = 5                            # first residue ID
+set fres = 510                            # last  residue ID
 
 # Make destination directory, if not exist
 if ( ! -e $dire ) then

@@ -18,7 +18,7 @@
 ###################
 
 # Set variables
-set dire = "7-d-fraction-seg-hbonds" # where you put output
+set dire = "7-d-fraction-seg" # where you put output
 
 # Make destination directory, if not exist
 if ( ! -e $dire ) then
@@ -46,9 +46,9 @@ while ( $seg <= $nseg )
             goto nextres
         else if ( $test == 1 ) then # res$i is not PRO
             if ( $i == $sres ) then # This misses the case where a starting residue is a PRO
-                awk '{for(i=1;i<=NF;i++) a[i,NR]=$i}END{for(i=1;i<=NF;i++) {for(j=1;j<=NR;j++) printf a[i,j] " ";print ""}}' ../6-d-fraction-hbonds/df_res$i.dat > tmp
+                awk '{for(i=1;i<=NF;i++) a[i,NR]=$i}END{for(i=1;i<=NF;i++) {for(j=1;j<=NR;j++) printf a[i,j] " ";print ""}}' ../6-d-fraction/df_res$i.dat > tmp
             else
-                awk '{print $2}' ../6-d-fraction-hbonds/df_res$i.dat | awk '{for(i=1;i<=NF;i++) a[i,NR]=$i}END{for(i=1;i<=NF;i++) {for(j=1;j<=NR;j++) printf a[i,j] " ";print ""}}' >> tmp
+                awk '{print $2}' ../6-d-fraction/df_res$i.dat | awk '{for(i=1;i<=NF;i++) a[i,NR]=$i}END{for(i=1;i<=NF;i++) {for(j=1;j<=NR;j++) printf a[i,j] " ";print ""}}' >> tmp
             endif
         endif
         nextres:

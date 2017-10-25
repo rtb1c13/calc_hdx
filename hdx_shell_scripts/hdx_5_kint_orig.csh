@@ -33,8 +33,8 @@
 
 # Set variables
 set dire = 5-kint-orig                 # where you put output
-set sres = 1                            # first residue ID
-set fres = 513                          # last  residue ID
+set sres = 5                            # first residue ID
+set fres = 511                          # last  residue ID
 set Texp = 298                          # experimental temperature, K
 set pKD  = 14.87                        # pKa of deuterium water at Texp
 set pD   = 7.4                          # experimental pD

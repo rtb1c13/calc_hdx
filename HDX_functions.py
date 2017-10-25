@@ -30,7 +30,7 @@ def load_fulltraj(traj, parm, **kwargs):
        See also load_trajchunks for an iterative load of large trajectories """
     return md.load(traj, top=parm, **kwargs)
 
- def load_trajchunks(traj, parm, **kwargs):
+def load_trajchunks(traj, parm, **kwargs):
     """Loads a file into a generator of MDtraj trajectory chunks.
        Useful for large/memory intensive trajectory files
        Usage: load_trajchunks(traj, parm, [**kwargs])
@@ -44,10 +44,10 @@ def load_fulltraj(traj, parm, **kwargs):
 
 
 
-def list_prolines(univ, log="HDX_analysis.log"):
+def list_prolines(traj, log="HDX_analysis.log"):
     """Creates a list of proline residues and appropriate resids
 
-       Usage: list_prolines(univ, [log])
+       Usage: list_prolines(traj, [log])
        Returns: Numpy array of [[Proline_ID, Proline_index]]"""
     prolist = [ r.resSeq for r in traj.topology.residues if r.name=='PRO' ]
     proidx = [ r.index for r in traj.topology.residues if r.name=='PRO' ]
@@ -79,8 +79,40 @@ def select_resids(traj, idxlist, protonly=True, invert=False):
 def calc_contacts(traj, qidx, cidx, cutoff=0.65):
     """Calculates contacts between 'query' and 'contact' atom selections
        within a specified cutoff (default = 0.65, for coordinates in nm).
+       Periodicity is included in MDtraj function by default.
        Usage: calc_contacts(traj, qidx, cidx, [cutoff=0.65]).
 
        Qidx and cidx are the atom index lists to search for contacts from
-       and to respectively (e.g. from amide NH to all heavy atoms)."""
-    
+       and to respectively (e.g. from amide NH to all heavy atoms).
+
+       Returns count of contacts for each frame in supplied trajectory."""
+
+    byframe_ctacts = md.compute_neighbors(traj, cutoff, qidx, haystack_indices=cidx)
+    return map(lambda x: len(x), byframe_ctacts)
+
+
+# These should go in a class for residues that calcs pfactor, kint, neighbouring residues and the rest
+def extract_NH(traj, prolines=None, atomselect="(name H or name HN)"):
+    """Returns a list of backbone amide H atom indices, suitable
+       for use with 'calc_contacts'. Optionally takes an array of 
+       resids/indices to skip (normally prolines) and by default returns
+       atom indices matching 'name H and backbone'
+       
+       Usage: extract_NH(traj, [prolines, atomselect])"""
+
+    if prolines is not None:
+        # Syntax = "... and not (residue 1 or residue 2 or residue 3 ... )"
+        atomselect += " and not (residue %s" % ' or residue '.join(str(_) for _ in prolines[:,0]) + ")"
+        return t.topology.select(atomselect)
+    else:
+        return t.topology.select(atomselect)
+
+
+
+
+
+
+
+
+
+ 

@@ -18,11 +18,11 @@
 ###################
 
 # Set variables
-set dire = 4-p-factor-hbonds            # where you put output
+set dire = 4-p-factor                   # where you put output
 set parc = 0.35                         # beta_c in the phenomenological equation
 set parh = 2                            # beta_h in the phenomenological equation
-set sres = 1                            # first residue ID
-set fres = 512                          # last  residue ID
+set sres = 5                            # first residue index (res2, res1 has no NH)
+set fres = 510                          # last  residue index
 
 # Make destination directory, if not exist
 if ( ! -e $dire ) then
@@ -42,8 +42,8 @@ while ( $i <= $fres )
         goto nextres # residue is proline, go to next residue
     else if ( $test == 1 ) then
         echo "# Time Nc Nh Pfactor" > pf_res$i.dat
-        cp ../1-nc-nhbonds/nc_res$i.dat tmp1
-        awk '{print $2}' ../1-nc-nhbonds/nh_res$i.dat > tmp2
+        cp ../1-nc-nh/nc_res$i.dat tmp1
+        awk '{print $2}' ../1-nc-nh/nh_res$i.dat > tmp2
         paste tmp1 tmp2 | awk '{printf "%4.4f %3d %3d %12.5f \n", $1, $2, $3, exp('$parc'*$2+'$parh'*$3)}' >> pf_res$i.dat
         rm -f tmp*
     endif

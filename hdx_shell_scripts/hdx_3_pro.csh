@@ -48,6 +48,6 @@ foreach i (`cat pro.list`)
     rm -f tmp.txt res$j.* angdist.xvg
     set cisp = `awk '{if(($2<=90)&&($2>=-90)) print $2}' $dire/res$j.dat | wc -l`
     if ( $cisp > 0 ) then
-        echo "PRO$j has cis conformation!!!!!" # in case of cis-proline
+        echo "PRO$j has $cisp cis conformation(s)!!!!!" >> $dire/prolines.log # in case of cis-proline
     endif
 end

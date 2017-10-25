@@ -26,8 +26,8 @@ set trj  = Leut_stripped.trr            # trajectory file #CHANGE
 set tpr  = ../Leut_HDX.tpr              # run input file #CHANGE
 set pdb  = ../Leut_desolv.pdb           # structure file #CHANGE
 set dire = 1-nc-nh                        # where you put output
-set sres = 2                            # first residue ID (1st residue is NT-ACE in GROMACS)
-set fres = 513                          # last  residue ID (1st residue is NT-ACE in GROMACS)
+set sres = 6                            # first residue ID (1st residue is NT-ACE in GROMACS)
+set fres = 511                          # last  residue ID (1st residue is NT-ACE in GROMACS)
 set cutc = 0.65                         # cutoff for Nc, nm
 set cuth = 0.24                         # cutoff for Nh, nm
 

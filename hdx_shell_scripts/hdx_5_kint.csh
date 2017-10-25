@@ -17,8 +17,8 @@
 # Check Bai_Proteins_1993_v17_p75 for details.                                    #
 ###################################################################################
 # Before using the script, make sure you have following three lists               #
-# res.list - listing resnames & resids; HSE/HSD ---> HIS, leave HSP as they are.  #
-#            If pKa's for His unknown, use HIS for all.                           #
+# res.list - listing resnames & resids; HSE/HSD ---> HSD, leave HSP as they are.  #
+#            If pKa's for His unknown, use HSD for all.                           #
 #            Modify protonated GLU to GLUP                                        #
 # pro.list - listing prolines                                                     #
 # hdx_sd-exrate_new.dat - copied from Table II of Bai_Proteins_1993_v17_p75       #
@@ -32,7 +32,7 @@
 ###################
 
 # Set variables
-set dire = 5-kint-PDLAref               # where you put output
+set dire = 5-kint                       # where you put output
 set sres = 1                            # first residue ID
 set fres = 513                          # last  residue ID
 set Texp = 298                          # experimental temperature, K
@@ -47,8 +47,8 @@ endif
 ################################################
 # Compute k_A, k_B, k_W at your experimental T #
 ################################################
-set lgkAref = 1.62     # lg reference reaction rates of  acid-catalyzed HDX, /M/min (low salt)
-set lgkBref = 10.05    # lg reference reaction rates of  base-catalyzed HDX, /M/min (low salt)
+set lgkAref = 2.04     # lg reference reaction rates of  acid-catalyzed HDX, /M/min (low salt)
+set lgkBref = 10.36    # lg reference reaction rates of  base-catalyzed HDX, /M/min (low salt)
 set lgkWref = -1.5     # lg reference reaction rates of water-catalyzed HDX, /M/min (low salt)
 set EaA     = 14       # activation energy for  acid-catalyzed HDX, kcal/mol
 set EaB     = 17       # activation energy for  base-catalyzed HDX, kcal/mol
