@@ -18,6 +18,12 @@ import argparse
 
 
 
+# Exception for HDX
+class HDX_Error(Exception):
+    """Exception in HDX module"""
+
+
+
 # Functions
 def load_fulltraj(traj, parm, **kwargs):
     """Loads an MDtraj trajectory object with the desired topology
@@ -133,8 +139,6 @@ def extract_HN(traj, prolines=None, atomselect="(name H or name HN)", log="HDX_a
                     "%s\n" % ' '.join(atm2res(i) for i in traj.topology.select(atomselect)))
         return traj.topology.select(atomselect)
 
-   # Next: take each HN and calc hbonds?
-   # calc_contacts can be used for normal distance-based selections (2.4A H - heavy)
 def _calc_hbonds_contacts(traj, HN, cutoff=0.24, **kwargs):
     """Calculates number of protein H-bonds for a particular atom index
        using the 'contacts' method. Cutoff = 0.24 nm by default. Bonds to
@@ -149,52 +153,35 @@ def _calc_hbonds_contacts(traj, HN, cutoff=0.24, **kwargs):
     hbond_counts = calc_contacts(traj, HN, c, cutoff=cutoff)
     return hbond_counts
 
-def _calc_hbonds_bh(traj, HN, minfreq=0.0, **kwargs):
+def _calc_hbonds_bh(traj, HN, minfreq=0.0, cutoff=0.25, angle=120.0, **kwargs):
     """Calculates number of protein H-bonds for a particular atom index
-       using the 'Baker-Hubbard' method (donor-acceptor distance < 0.25 nm
-       + angle > 120 degrees).
-       Reports all H-bonds (minimum freq=0.0) by default. Other kwargs:
-       exclude_water=True and periodic=True.
+       using the 'Baker-Hubbard' method. Default donor-acceptor distance < 0.25 nm
+       + angle > 120 degrees.
+       Reports all H-bonds (minimum freq=0.0) by default. For other kwargs
+       see mdtraj.geometry.hbond._get_bond_triplets or ..._compute_bounded_geometry.
        
-       Usage: _calc_hbonds_bh(t, atom, [minfreq, **kwargs])"""
+       Usage: _calc_hbonds_bh(traj, atom, [minfreq, cutoff, angle, **kwargs])
+       Returns: n_frames length array of H-bond counts for desired atom"""
 
     # Atoms for H-bonds includes all O*, N* and single HN hydrogen
     
     c = traj.atom_slice(traj.topology.select("protein and (symbol O or symbol N) or index %s" % HN))
-    bond_triplets = md.geometry.hbond._get_bond_triplets(c.topology,\
-                    exclude_water=True, sidechain_only=False)
-    def _compute_bounded_geometry_RTB(traj, triplets, distance_cutoff, distance_indices,
-                                      angle_indices, freq=0.0, periodic=True):
-        """
-        Returns a tuple include (1) the mask for triplets that fulfill the distance
-        criteria frequently enough, (2) the actual distances calculated, and (3) the
-        angles between the triplets specified by angle_indices.
-        """
-        # First we calculate the requested distances
-        distances = md.compute_distances(traj, triplets[:, distance_indices], periodic=periodic)
 
-        # Calculate angles using the law of cosines
-        abc_pairs = zip(angle_indices, angle_indices[1:] + angle_indices[:1])
-        abc_distances = []
+    # Call internal functions of md.baker_hubbard directly to return
+    # distances & angles, otherwise only bond_triplets averaged across
+    # a trajectory are returned
+    bond_triplets = md.geometry.hbond._get_bond_triplets(c.topology, **kwargs)
+    mask, distances, angles = md.geometry.hbond._compute_bounded_geometry(c, bond_triplets,\
+                              0.25, [1, 2], [0, 1, 2], freq=minfreq, periodic=True)
 
-        # Calculate distances (if necessary)
-        for abc_pair in abc_pairs:
-            if set(abc_pair) == set(distance_indices):
-                abc_distances.append(distances)
-            else:
-                abc_distances.append(md.compute_distances(traj, triplets[:, abc_pair],
-                    periodic=periodic))
-
-        # Law of cosines calculation
-        a, b, c = abc_distances
-        cosines = (a ** 2 + b ** 2 - c ** 2) / (2 * a * b)
-        np.clip(cosines, -1, 1, out=cosines) # avoid NaN error
-        angles = np.arccos(cosines)
-
-        return distances, angles
-    distances, angles = _compute_bounded_geometry_RTB(c, bond_triplets,\
-                              0.25, [1, 2], [0, 1, 2], freq=0.0, periodic=True)
-    hbond_counts = np.sum(np.logical_and(distances < 0.25, angles > (2.0 * np.pi / 3)),axis=1)
+    # can select distance/angle criteria here
+    try:
+        ang_rad = 2.0*np.pi / (360./angle)
+    except ZeroDivisionError:
+        angle = 360.0
+        ang_rad = 2.0*np.pi / (360./angle)
+        
+    hbond_counts = np.sum(np.logical_and(distances < cutoff, angles > ang_rad), axis=1)
     return hbond_counts
 
 def calc_hbonds(traj, method, donors, **kwargs):
@@ -203,10 +190,13 @@ def calc_hbonds(traj, method, donors, **kwargs):
        any one of the methods below.
 
        Available methods:
-          'contacts' : Distance-based cutoff of 0.24 nm
+          'contacts' : Distance-based cutoff of 0.24 nm 
           'bh'       : Baker-Hubbard distance ( < 0.25 nm) and angle ( > 120 deg) cutoff
-       
-       Usage: calc_hbonds(traj, method=['contacts','bh'], donors)"""
+
+       Default cutoff/angle can be adjusted with the 'cutoff' and 'angle' kwargs
+
+       Usage: calc_hbonds(traj, method=['contacts','bh'], donors, [**kwargs])
+       Returns: n_donors * n_frames 2D array of H-bond counts per frame for all donors"""
     
     # Switch for H-bond methods
     methods = {
