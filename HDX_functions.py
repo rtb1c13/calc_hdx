@@ -139,7 +139,7 @@ def extract_HN(traj, prolines=None, atomselect="(name H or name HN)", log="HDX_a
     else:
         with open(log, 'a') as f:
             f.write("Extracted HN from resids:\n"+ \
-                    "%s\n" % ' '.join(atm2res(i) for i in traj.topology.select(atomselect)))
+                    "%s\n" % '\n'.join(atm2res(i) for i in traj.topology.select(atomselect))) 
         return traj.topology.select(atomselect)
 
 def _calc_hbonds_contacts(traj, HN, cutoff=0.24, **kwargs):
@@ -216,7 +216,11 @@ def calc_hbonds(traj, method, donors, skip_first=True, **kwargs):
         total_counts = np.zeros((1,traj.n_frames))
     for i, v in enumerate(donors):
         total_counts[i] = methods[method](traj, v, **kwargs)
-    return total_counts
+
+    reslist = [ traj.topology.atom(a).residue.index for a in donors ]
+#    hbonds = np.concatenate((np.asarray([reslist]).reshape(len(reslist),1), total_counts), axis=1) # Array of [[ Res idx, Contact count ]]
+
+    return np.asarray(reslist), total_counts 
         
 def calc_nh_contacts(traj, reslist, cutoff=0.65, skip_first=True, protonly=True):
     """Calculates contacts between each NH atom and the surrounding heavy atoms,
@@ -244,9 +248,10 @@ def calc_nh_contacts(traj, reslist, cutoff=0.65, skip_first=True, protonly=True)
         
         contact_count[idx] = calc_contacts(traj, robj.atom('N').index, heavys, cutoff=cutoff)
 
-    return contact_count
+#    contacts = np.concatenate((np.asarray([reslist]).reshape(len(reslist),1), contact_count), axis=1) # Array of [[ Res idx, Contact count ]]
+    return np.asarray(reslist), contact_count 
 
-def PF(traj, hbond_method='contacts', **kwargs):
+def PF(traj, hbond_method='contacts', save_contacts=False, **kwargs):
 
     # Setup residue/atom lists        
     hn_atms = extract_HN(traj)
@@ -255,16 +260,34 @@ def PF(traj, hbond_method='contacts', **kwargs):
     reslist = [ r.index for r in traj.topology.residues if r.is_protein and r.index not in prolines[:,1] ]
 
     # Calc Nc/Nh
-    hbonds = calc_hbonds(traj, hbond_method, hn_atms, **kwargs)
-    contacts = calc_nh_contacts(traj, reslist, **kwargs)
+    hres, hbonds = calc_hbonds(traj, hbond_method, hn_atms, **kwargs)
+    cres, contacts = calc_nh_contacts(traj, reslist, **kwargs)
 
+    if not np.array_equal(hres, cres):
+        raise HDX_Error("The residues analysed for Nc and Nh appear to be different. Check your inputs!")
+
+    # Option to save outputs
+    if save_contacts:
+        for i, residx in enumerate(hres):
+            np.savetxt("Hbonds_%d.tmp" % (residx+1), hbonds[i], fmt='%d') # Use residue indices internally, print out IDs
+        for i, residx in enumerate(cres):
+            np.savetxt("Contacts_%d.tmp" % (residx+1), contacts[i], fmt='%d') # Use residue indices internally, print out IDs
     # Calc PF with phenomenological equation
     hbonds *= 2        # Beta parameter 1
     contacts *= 0.35   # Beta parameter 2
 
     pf = np.exp(hbonds + contacts)
     pf = np.mean(pf, axis=1)
-    return pf
+
+    # Save PFs to separate log file
+    np.savetxt("Protection_factors.tmp", np.stack((hres+1, pf), axis=1), \
+               fmt=['%7d','%18.8f'], header="ResID  Protection factor") # Use residue indices internally, print out IDs
+
+    return hres, pf
+
+# Kints? First check cis/trans pro
+
+#atoms, angles = md.compute_omega(traj)
 
 
             
