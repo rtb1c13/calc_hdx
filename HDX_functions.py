@@ -74,25 +74,28 @@ def list_prolines(traj, log="HDX_analysis.log"):
                 "%s\n" % ' '.join(str(i) for i in prolist))
     return np.asarray(zip(prolist, proidx))
 
-def select_resids(traj, idxlist, protonly=True, invert=False):
-    """Returns atom indices of residues (0-indexed) in the supplied list,
-       with options to restrict the selection to protein-only atoms
-       (default) and/or select all atoms NOT in a supplied list.
+def select_residxs(traj, reslist, protonly=True, invert=False):
+    """Returns atom indices of atoms belonging to residues (0-indexed)
+       in the supplied list,
+
+       Options to restrict the selection to protein-only atoms
+       (default) and/or select all atoms NOT in residues in the supplied list.
        (inversion of selection, off by default)
 
-       Usage: select_resids(traj, residxlist, [protonly, invert])"""
+       Usage: select_resids(traj, reslist, [protonly, invert])
+       Returns: Numpy array of selected atom indices"""
 
     # The topology.select syntax is more restrictive than MDAnalysis here
     # - use list comprehensions instead
     if invert:
         if protonly:
-            return np.asarray([ atom.index for atom in t.topology.atoms if (atom.residue.is_protein and atom.residue.index not in l) ])
+            return np.asarray([ atom.index for atom in traj.topology.atoms if (atom.residue.is_protein and atom.residue.index not in reslist) ])
         else:
-            return np.asarray([ atom.index for atom in t.topology.atoms if (atom.residue.index not in l) ])
+            return np.asarray([ atom.index for atom in traj.topology.atoms if (atom.residue.index not in reslist) ])
     elif protonly:
-        return np.asarray([ atom.index for atom in t.topology.atoms if (atom.residue.is_protein and atom.residue.index in l) ])
+        return np.asarray([ atom.index for atom in traj.topology.atoms if (atom.residue.is_protein and atom.residue.index in reslist) ])
     else:
-        return np.asarray([ atom.index for atom in t.topology.atoms if (atom.residue.index in l) ])
+        return np.asarray([ atom.index for atom in traj.topology.atoms if (atom.residue.index in reslist) ])
 
 def calc_contacts(traj, qidx, cidx, cutoff=0.65):
     """Calculates contacts between 'query' and 'contact' atom selections
@@ -184,7 +187,7 @@ def _calc_hbonds_bh(traj, HN, minfreq=0.0, cutoff=0.25, angle=120.0, **kwargs):
     hbond_counts = np.sum(np.logical_and(distances < cutoff, angles > ang_rad), axis=1)
     return hbond_counts
 
-def calc_hbonds(traj, method, donors, **kwargs):
+def calc_hbonds(traj, method, donors, skip_first=True, **kwargs):
     """Calculates H-bond counts per frame for each atom in 'donors' array
        to each acceptor atom in the system. H-bonds can be defined using
        any one of the methods below.
@@ -203,6 +206,10 @@ def calc_hbonds(traj, method, donors, **kwargs):
                'contacts' : _calc_hbonds_contacts,
                'bh' : _calc_hbonds_bh
               }
+
+    if skip_first:
+        donors = donors[1:] # Remove first atom/residue from list
+
     try:
         total_counts = np.zeros((len(donors),traj.n_frames))
     except TypeError:
@@ -211,12 +218,59 @@ def calc_hbonds(traj, method, donors, **kwargs):
         total_counts[i] = methods[method](traj, v, **kwargs)
     return total_counts
         
-          
+def calc_nh_contacts(traj, reslist, cutoff=0.65, skip_first=True, protonly=True):
+    """Calculates contacts between each NH atom and the surrounding heavy atoms,
+       excluding those in residues n-2 to n+2.
+
+       By default contacts < 0.65 nm are calculated, and only protein-heavys,
+       are included, but can include all heavys if desired. Also skips first 
+       residue (N-terminus) in a residue list by default too.
+
+       Usage: calc_nh_contacts(traj, reslist, [cutoff=0.65, skip_first=True, protein=True])
+       Returns: n_res x n_frames 2D array of contacts per frame for each residue in reslist"""
+
+    # Check if current atom is a heavy atom
+    is_heavy = lambda _: traj.topology.atom(_).element.symbol is not 'H'
+
+    if skip_first:
+        reslist.pop(0) # Remove first atom/residue from list
+
+    contact_count = np.zeros((len(reslist), traj.n_frames))
+    for idx, res in enumerate(reslist):
+        robj = traj.topology.residue(res)
+        excl_idxs = range(robj.index - 2, robj.index + 3, 1) # Exclude n-2 to n+2 residues
+        inv_atms = select_residxs(traj, excl_idxs, protonly=protonly, invert=True) # At this stage includes H + heavys
+        heavys = inv_atms[ np.array( [ is_heavy(i) for i in inv_atms ] ) ] # Filter out non-heavys
+        
+        contact_count[idx] = calc_contacts(traj, robj.atom('N').index, heavys, cutoff=cutoff)
+
+    return contact_count
+
+def PF(traj, hbond_method='contacts', **kwargs):
+
+    # Setup residue/atom lists        
+    hn_atms = extract_HN(traj)
+    prolines = list_prolines(traj)
+    # All protein residues except prolines
+    reslist = [ r.index for r in traj.topology.residues if r.is_protein and r.index not in prolines[:,1] ]
+
+    # Calc Nc/Nh
+    hbonds = calc_hbonds(traj, hbond_method, hn_atms, **kwargs)
+    contacts = calc_nh_contacts(traj, reslist, **kwargs)
+
+    # Calc PF with phenomenological equation
+    hbonds *= 2        # Beta parameter 1
+    contacts *= 0.35   # Beta parameter 2
+
+    pf = np.exp(hbonds + contacts)
+    pf = np.mean(pf, axis=1)
+    return pf
 
 
-   # Then: Take each NH and calc contacts?
+            
+            
 
-   # Then: PF calculation function?
+
 
 
 
@@ -225,3 +279,6 @@ def calc_hbonds(traj, method, donors, **kwargs):
 
 
  
+
+
+
