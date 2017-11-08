@@ -15,7 +15,7 @@ from __future__ import division
 import mdtraj as md
 import numpy as np
 import argparse
-
+import itertools
 
 
 # Exception for HDX
@@ -543,6 +543,52 @@ def kint(traj, reslist, log="HDX_analysis.log", **kwargs):
                fmt=['%7d','%18.8f'], header="ResID  Intrinsic rate ") # Use residue indices internally, print out IDs
 
     return kints, reslist
+
+# Deuterated fration by residue
+def dfrac(reslist, pfs, kints, times):
+
+    if len(set(map(len,[reslist, pfs, kints]))) != 1: # Check that all lengths are the same (set length = 1)
+        raise HDX_Error("Can't calculate deuterated fractions, your residue/protection factor/rates arrays are not the same length.")
+
+    try:
+       fracs = np.zeros((len(reslist), len(times)))
+    except TypeError:
+       fracs = np.zeros((len(reslist), 1))
+    for i2, t in enumerate(times):
+        def _residue_fraction(pf, k, time=t):
+            return 1 - np.exp(-k / pf * time)
+        for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, pfs, kints)):
+            fracs[i1,i2] = curr_frac
+
+    np.savetxt("Residue_fractions.tmp", np.hstack((np.reshape(reslist+1, (len(reslist),1)), fracs)), \
+               fmt='%7d ' + '%8.5f '*len(times), header="ResID  Deuterated fraction, Times / min: %s"  \
+               % ' '.join([ str(t) for t in times ])) # Use residue indices internally, print out IDs
+    return fracs
+
+def read_segfile(fn):
+
+    return np.loadtxt(fn, dtype='i8') - 1 # Convert resIDs to indices for internal use
+
+    
+def segments(reslist, fracs, segfn, times):
+
+
+    segs = read_segfile(segfn)
+    try:
+       aves = np.zeros((len(segs), len(times)))
+    except TypeError:
+       aves = np.zeros((len(segs), 1))    
+    for i2, t in enumerate(times):
+        for i1, s in enumerate(segs):
+            idxs = np.where(np.logical_and( reslist > s[0], reslist <= s[1]))[0] # > s[0] skips the first residue in segment
+            aves[i1, i2] = np.mean(fracs[idxs, i2])
+               # Return segs to resIDs for printout
+    np.savetxt("Segment_average_fractions.tmp", np.hstack((segs + 1,aves)), \
+               fmt='%6d %6d ' + '%8.5f '*len(times), header="Res 1   Res2  Times / min: %s" \
+               % ' '.join([ str(t) for t in times ])) 
+    return segs, aves
+
+
 
 # main() below here
 #if __name__ == '__main__-:
