@@ -281,18 +281,18 @@ def PF(traj, hbond_method='contacts', save_contacts=False, **kwargs):
     # Option to save outputs
     if save_contacts:
         for i, residx in enumerate(hres):
-            np.savetxt("Hbonds_%d.tmp" % (residx+1), hbonds[i], fmt='%d') # Use residue indices internally, print out IDs
+            np.savetxt("Hbonds_%d.tmp" % traj.topology.residue(residx).resSeq, hbonds[i], fmt='%d') # Use residue indices internally, print out IDs
         for i, residx in enumerate(cres):
-            np.savetxt("Contacts_%d.tmp" % (residx+1), contacts[i], fmt='%d') # Use residue indices internally, print out IDs
+            np.savetxt("Contacts_%d.tmp" % traj.topology.residue(residx).resSeq, contacts[i], fmt='%d') # Use residue indices internally, print out IDs
     # Calc PF with phenomenological equation
     hbonds *= 2        # Beta parameter 1
     contacts *= 0.35   # Beta parameter 2
 
     pf = np.exp(hbonds + contacts)
     pf = np.mean(pf, axis=1)
-
+    rids = np.asarray([ traj.topology.residue(i).resSeq for i in hres ])
     # Save PFs to separate log file
-    np.savetxt("Protection_factors.tmp", np.stack((hres+1, pf), axis=1), \
+    np.savetxt("Protection_factors.tmp", np.stack((rids, pf), axis=1), \
                fmt=['%7d','%18.8f'], header="ResID  Protection factor") # Use residue indices internally, print out IDs
 
     return hres, pf
@@ -493,7 +493,7 @@ def kint(traj, reslist, log="HDX_analysis.log", **kwargs):
                 continue
         except AttributeError:
             pass
-        if curr.name == 'GLU': # If Glu has a prodonated carboxylate
+        if curr.name == 'GLU': # If Glu has a protonated carboxylate
             try:
                 curr.atom('HE2')
                 curr.name = 'GLH'
@@ -538,14 +538,22 @@ def kint(traj, reslist, log="HDX_analysis.log", **kwargs):
             curr_adjs.extend(_rate_adjs[prev.name][2:4])
             kints[i] = _adj_to_rates(curr_adjs, **kwargs)
 
+    rids = np.asarray([ traj.topology.residue(i).resSeq for i in reslist ])
     # Save PFs to separate log file
-    np.savetxt("Intrinsic_rates.tmp", np.stack((reslist+1, kints), axis=1), \
+    np.savetxt("Intrinsic_rates.tmp", np.stack((rids, kints), axis=1), \
                fmt=['%7d','%18.8f'], header="ResID  Intrinsic rate ") # Use residue indices internally, print out IDs
 
     return kints, reslist
 
 # Deuterated fration by residue
-def dfrac(reslist, pfs, kints, times):
+def dfrac(traj, reslist, pfs, kints, times):
+    """Function for calculating deuterated fractions of a list
+       of residues, given a set of Protection factors, intrinsic
+       rates, and exposure times.
+
+       Usage: dfrac(traj, reslist, pfs, kints, times)
+       Returns: [n_residues, n_times] 2D numpy array of deuterated fractions"""
+
 
     if len(set(map(len,[reslist, pfs, kints]))) != 1: # Check that all lengths are the same (set length = 1)
         raise HDX_Error("Can't calculate deuterated fractions, your residue/protection factor/rates arrays are not the same length.")
@@ -560,32 +568,85 @@ def dfrac(reslist, pfs, kints, times):
         for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, pfs, kints)):
             fracs[i1,i2] = curr_frac
 
-    np.savetxt("Residue_fractions.tmp", np.hstack((np.reshape(reslist+1, (len(reslist),1)), fracs)), \
+    rids = np.asarray([ traj.topology.residue(i).resSeq for i in reslist ])
+    np.savetxt("Residue_fractions.tmp", np.hstack((np.reshape(rids, (len(reslist),1)), fracs)), \
                fmt='%7d ' + '%8.5f '*len(times), header="ResID  Deuterated fraction, Times / min: %s"  \
                % ' '.join([ str(t) for t in times ])) # Use residue indices internally, print out IDs
     return fracs
 
 def read_segfile(fn):
 
-    return np.loadtxt(fn, dtype='i8') - 1 # Convert resIDs to indices for internal use
+    # segfile should contain at most 2 columns, startres & endres
+    return np.loadtxt(fn, dtype='i8')  # ResIDs will be converted to indices with dictionary in segments function
 
     
-def segments(reslist, fracs, segfn, times):
+def segments(traj, reslist, fracs, segfn, times, log="HDX_analysis.log"):
+    """Function to average residue deuterated fractions over
+       a given set of peptide segments. The first residue in each
+       segment will not be included in the averaging, as it is assumed
+       to be 100% back-exchanged during analysis.
 
+       Residue indices provided in the given list are converted to 
+       residue IDs from the given trajectory's topology. Currently this
+       remumbering will only work for single chain topologies with sequential
+       numbering. If a residue in a segment is not found (e.g. a truncated
+       N/C terminus), the next residue is chosen as the start/end point instead.
 
+       Writes info on skipped residues to logfile "HDX_analysis.log" by default
+       and the segment/average deuteration information to "Segment_average_fractions.tmp"
+
+       Usage: segments(traj, reslist, fracs, segfile_name, times, [ log="HDX_analysis.log" ])
+       Returns: [n_segs, 2] 2D numpy array of segment start/end residue IDs, 
+                [n_segs, n_times] 2D numpy array of segment deuterated fractions at each timepoint"""
+
+    res2idx = {}
+    with open(log, 'a') as f:
+        f.write("Now converting residue numbers to indices for segment averaging:\n")
+    for idx, res in enumerate(traj.topology.residues):
+        if res.is_protein:
+#            res2idx[str(res.chain.index) + '-' + str(res.resSeq)] = idx
+            res2idx[res.resSeq] = idx # Only works for single chain, no re-use of resnums
+        else:
+            with open(log, 'a') as f:
+                f.write("Skipping residue: %s, not a protein residue\n" % res)
+        
+        
     segs = read_segfile(segfn)
     try:
        aves = np.zeros((len(segs), len(times)))
     except TypeError:
-       aves = np.zeros((len(segs), 1))    
+       aves = np.zeros((len(segs), 1))
+       times = [times]    
     for i2, t in enumerate(times):
         for i1, s in enumerate(segs):
-            idxs = np.where(np.logical_and( reslist > s[0], reslist <= s[1]))[0] # > s[0] skips the first residue in segment
+            try:
+                start = res2idx[s[0]]
+            except KeyError:
+                with open(log, 'a') as f:
+                    f.write("Didn't find residue %s in protein. Using residue %s as startpoint instead.\n" \
+                             % (s[0], traj.topology.residue(0)))
+                start = 0
+            try:
+                end = res2idx[s[1]]
+            except KeyError:
+                with open(log, 'a') as f:
+                    f.write("Didn't find residue %s in protein. Using residue %s as endpoint instead.\n" \
+                             % (s[0], traj.topology.residue(-1)))
+                end = traj.topology.residue(-1).index
+                
+            idxs = np.where(np.logical_and( reslist > start, reslist <= end ))[0] # > s[0] skips the first residue in segment
             aves[i1, i2] = np.mean(fracs[idxs, i2])
                # Return segs to resIDs for printout
-    np.savetxt("Segment_average_fractions.tmp", np.hstack((segs + 1,aves)), \
+    #_to_resseq = lambda x: traj.topology.residue(x).resSeq
+    #vecseg = np.vectorize(_to_resseq)
+    #segids = vecseg(segs)
+    
+        
+    np.savetxt("Segment_average_fractions.tmp", np.hstack((segs, aves)), \
                fmt='%6d %6d ' + '%8.5f '*len(times), header="Res 1   Res2  Times / min: %s" \
                % ' '.join([ str(t) for t in times ])) 
+    with open(log, 'a') as f:
+        f.write("Segment averaging complete.\n")
     return segs, aves
 
 
