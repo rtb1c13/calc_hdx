@@ -286,6 +286,240 @@ class Radou():
 
         return hres, pf
 
+    def pro_omega_indices(self, prolines):
+        """Calculates omega dihedrals (CA-C-N-CA) for all proline
+           residues in a given prolines array from list_prolines.
+    
+           Usage: pro_omega_indices(traj, prolines)
+           Returns: (atom_indices, w_angles_by_frame)"""
+
+        atom_names = ['CA', 'C', 'N', 'CA']
+        offset = np.asarray([-1, -1, 0, 0])
+
+        w_indices = np.zeros((len(prolines),4))
+        for i, residx in enumerate(prolines[:,1]):
+            curr_offset = offset + residx
+            curr_atm_indices = []
+            for x in zip(curr_offset, atom_names):
+                # Cycle through previous CA/C, current N, CA
+                curr_atm_indices.append(self.top.residue(x[0]).atom(x[1]).index)
+            w_indices[i] = curr_atm_indices
+
+        return w_indices, md.compute_dihedrals(self.t, w_indices)
+
+    # Assignments for intrinsic rate adjustments:
+    # 1) cis/trans prolines
+    # 2) disulfides
+    # 3) His protonation states
+    # 4) N/C termini
+
+    def assign_cis_proline(self):
+        """Assigns cis-proline residues"""
+
+### *** ### calls list_prolines
+        prolines = list_prolines(self.t)
+        outidxs, outangs = pro_omega_indices(prolines)
+        for i, proidx in enumerate(prolines[:,1]):
+            self.top.residue(proidx).cis_byframe = np.logical_and(outangs < np.pi/2, outangs > -1*np.pi/2)[:,i]
+            if np.max(self.top.residue(proidx).cis_byframe) > 0:
+                with open(self.params['logfile'], 'a') as f:
+                    f.write("Cis-proline found at frame %d for residue %s!\n" % (np.argmax(self.top.residue(proidx).cis_byframe) + 1, self.top.residue(proidx).resSeq))
+
+    def assign_disulfide(self):
+        """Assigns residues involved in disulfide bridges"""
+
+        # This selection syntax & assignment is untested
+        sg = self.top.select('name SG and resname CYS or resname CYX')
+        try:
+            sg_coords = self.t.atom_slice(sg).xyz
+        except IndexError: # Catch empty sg
+            with open(log, 'a') as f:
+                f.write("No cysteines found in topology.\n")
+            return
+        self.top.create_standard_bonds()
+        self.top.create_disulfide_bonds(sg_coords)
+        # Assign disulfides (identical for each frame)
+        for b in self.top._bonds:
+            if all(i.element.symbol == 'S' for i in b):
+                b[0].residue.disulf = np.ones(self.t.n_frames, dtype=bool)
+                b[1].residue.disulf = np.ones(self.t.n_frames, dtype=bool)
+                with open(self.params['logfile'], 'a') as f:
+                    f.write("Disulfide found for residues %s - %s\n" \
+                             % (b[0].residue, b[1].residue))
+
+    def assign_his_protonation(self):
+        """Assigns protonation state to HIS residues"""
+
+        hisidx = [ r.index for r in self.top.residues if r.code == 'H' ]
+        for i in hisidx:
+            names = [ a.name for a in self.top.residue(i).atoms ]
+            if all(n in names for n in ['HD1','HE2']): # Atom names for doubly protonated His (Hip)
+                self.top.residue(i).HIP = np.ones(self.t.n_frames, dtype=bool)
+                with open(self.params['logfile'], 'a') as f:
+                    f.write("Protonated His assigned for residue %d\n" % self.top.residue(i).resSeq)
+#            else:
+#                self.top.residue(i).HIP = np.zeros(self.t.n_frames, dtype=bool)
+##  *** ### calls extract_HN/list_prolines
+
+    def assign_termini(self):
+        """Assigns flags to N and C terminal residues"""
+
+        for c in self.top.chains:
+            c.residue(0).nterm = np.ones(selft.n_frames, dtype=bool)
+            c.residue(-1).cterm = np.ones(self.t.n_frames, dtype=bool)
+            with open(self.params['logfile'], 'a') as f:
+                f.write("N-terminus identified at: %s\nC-terminus identified at: %s\n" \
+                         % (c.residue(0), c.residue(-1)))
+
+
+    # Helper function to turn sequence-specific rate adjustments to intrinsic acid/base/water rates
+    def _adj_to_rates(self, rate_adjs):
+        """Calculates intrinsic rates for a given set of rate adjustments
+           [ log(AL), log(BL), log(AR), log(BR) ] taken from Bai et al."""
+
+        # Calc reference rates at experimental temperature
+        # / np.log(10) = conversion from ln to log10
+        lgkAexp = self.params['rate_params']['lgkAref'] - (self.params['rate_params']['EaA'] \
+                  /  np.log(10) / self.params['rate_params']['R']) * \
+                  (1./self.params['rate_params']['Texp'] - 1./self.params['rate_params']['Tref'])
+        lgkBexp = self.params['rate_params']['lgkBref'] - (self.params['rate_params']['EaB'] \
+                  /  np.log(10) / self.params['rate_params']['R']) * \
+                  (1./self.params['rate_params']['Texp'] - 1./self.params['rate_params']['Tref'])
+        lgkWexp = self.params['rate_params']['lgkWref'] - (self.params['rate_params']['EaW'] \
+                  /  np.log(10) / self.params['rate_params']['R']) * \
+                  (1./self.params['rate_params']['Texp'] - 1./self.params['rate_params']['Tref'])
+
+        # Calc log(kA||kB||kW)
+        lgkA = lgkAexp + rate_adjs[0] + rate_adjs[2] - self.params['rate_params']['pD']
+        lgkB = lgkBexp + rate_adjs[1] + rate_adjs[3] - self.params['rate_params']['pKD'] + self.params['rate_params']['pD']
+        lgkW = lgkWexp + rate_adjs[1] + rate_adjs[3]
+
+        kint = 10**lgkA + 10**lgkB + 10**lgkW
+        #print(lgkAexp, lgkBexp, lgkWexp, 10**lgkA, 10**lgkB, 10**lgkW)
+        return kint
+
+# Intrinsic rate calc:
+    def kint(self):
+        """Function for calculating intrinsic rates of residues
+           in a given topology
+       
+           Intrinsic exchange rates k_int are computed using equations below.
+           k_int = k_A + k_B + k_W
+           lgk_A = lgk_A,ref + lgA_L + lgA_R - pD
+           lgk_B = lgk_B,ref + lgB_L + lgB_R - pOD
+                 = lgk_B,ref + lgB_L + lgB_R - pK_D + pOD
+           lgk_W = lgk_W,ref + lgB_L + lgB_R"""
+        # Create tmp copy of topology to adjust residue names
+#        tmptop = traj.topology.copy()
+
+        kints = np.zeros(len(self.reslist))
+
+
+     # Adjust residue names for: Cis-Pro, HIP, cystine bridges, GLH/ASH
+        reslist = np.insert(self.reslist,0,self.reslist[0]-1) # Insert 'prev' residue for first index
+        for i in reslist:
+            curr = self.top.residue(i)
+            try:
+                if np.max(curr.cis_byframe): # If cis-proline is true for any frame
+                    curr.name = 'PROC'
+                    continue
+            except AttributeError:
+                pass
+            try:
+                if np.max(curr.HIP): # If His+ is true for any frame
+                    curr.name = 'HIP'
+                    continue
+            except AttributeError:
+                pass
+            try:
+            if np.max(curr.disulf): # If Cys-Cys is true for any frame
+                curr.name = 'CYS2'
+                continue
+            except AttributeError:
+                pass
+            if curr.name == 'GLU': # If Glu has a protonated carboxylate
+            try:
+                curr.atom('HE2')
+                curr.name = 'GLH'
+                continue
+            except KeyError:
+                pass
+        if curr.name == 'ASP': # If Asp has a protonated carboxylate
+            try:
+                curr.atom('HD2')
+                curr.name = 'ASH'
+                continue
+            except KeyError:
+                pass
+
+        # Assign N/C termini
+        for chain in self.top.chains:
+            chain.residue(0).name = 'NT'
+            # Doesn't appead to be a standard name for COOH hydrogen - guess based on no. of bonds!
+            if chain.residue(-1).atom('O').n_bonds > 1 or chain.residue(-1).atom('OXT').n_bonds > 1:
+                chain.residue(-1).name = 'CTH'
+                print("It looks like you have a neutral C-terminus (COOH) at residue %s?" % chain.residue(-1))
+            else:
+                chain.residue(-1).name = 'CT'
+
+        reslist = np.delete(reslist, 0) # Remove i-1 residue we inserted above
+        for i, r in enumerate(reslist):
+            curr = self.top.residue(r)
+            prev = self.top.residue(r-1)
+            # check for cispro
+            if prev.name == 'PROC':
+                with open(self.params['logfile'], 'a') as f:
+                    f.write("Performing rate calculation on a by-frame basis for residue %s" % prev)
+                adj_cis, adj_trans = self.params['_reordered_kint_adjs'][curr.name][0:2], self.params['_reordered_kint_adjs'][curr.name][0:2]
+                adj_cis.extend(self.params['_reordered_kint_adjs']['PROC'][2:4])
+                adj_trans.extend(self.params['_reordered_kint_adjs']['PRO'][2:4])
+                kint_cis = _adj_to_rates(adj_cis)
+                kint_trans = _adj_to_rates(adj_trans)
+                kint_byframe = np.where(prev.cis_byframe, kint_cis, kint_trans)
+                kints[i] = np.mean(kint_byframe) # Overall intrinsic rate is adjusted by mean population of cis-pro
+            else:
+                curr_adjs = self.params['_reordered_kint_adjs'][curr.name][0:2]
+                curr_adjs.extend(self.params['_reordered_kint_adjs'][prev.name][2:4])
+                kints[i] = _adj_to_rates(curr_adjs)
+
+            rids = np.asarray([ self.top.residue(i).resSeq for i in reslist ])
+            # Save PFs to separate log file
+            np.savetxt("Intrinsic_rates.tmp", np.stack((rids, kints), axis=1), \
+                       fmt=['%7d','%18.8f'], header="ResID  Intrinsic rate ") # Use residue indices internally, print out IDs
+
+        return kints, reslist
+
+    # Deuterated fration by residue
+    def dfrac(self):
+        """Function for calculating deuterated fractions of a list
+           of residues, given a set of Protection factors, intrinsic
+           rates, and exposure times.
+
+           Usage: dfrac(traj, reslist, pfs, kints, times)
+           Returns: [n_residues, n_times] 2D numpy array of deuterated fractions"""
+
+
+        if len(set(map(len,[self.reslist, self.pfs, self.kints]))) != 1: # Check that all lengths are the same (set length = 1)
+            raise HDX_Error("Can't calculate deuterated fractions, your residue/protection factor/rates arrays are not the same length.")
+
+        try:
+            fracs = np.zeros((len(self.reslist), len(self.params['times'])))
+        except TypeError:
+            fracs = np.zeros((len(self.reslist), 1))
+        for i2, t in enumerate(self.params['times']):
+            def _residue_fraction(pf, k, time=t):
+                return 1 - np.exp(-k / pf * time)
+            for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, self.pfs, self.kints)):
+                fracs[i1,i2] = curr_frac
+
+        rids = np.asarray([ self.top.residue(i).resSeq for i in reslist ])
+        np.savetxt("Residue_fractions.tmp", np.hstack((np.reshape(rids, (len(reslist),1)), fracs)), \
+                   fmt='%7d ' + '%8.5f '*len(self.params['times']), header="ResID  Deuterated fraction, Times / min: %s"  \
+                   % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
+        return fracs
+
+
+
 
 
 
@@ -293,7 +527,7 @@ class Radou():
         """Runs a by-residue HDX prediction for the provided trajectory"""
         self.t = trajectory # Note this will add attributes to the original trajectory, not a copy
         self.top = trajectory.topology.copy() # This does not add attributes to the original topology
-        assign_cis_proline(self.t, log=self.params['logfile'])
+        assign_cis_proline()
         assign_disulfide(self.t, log=self.params['logfile'])
         assign_his_protonation(self.t, log=self.params['logfile'])
         assign_termini(self.t, log=self.params['logfile'])
