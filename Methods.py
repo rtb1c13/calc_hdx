@@ -1,12 +1,25 @@
 #!/usr/bin/env python
 
 # Class for HDX trajectories, inherited from MDTraj
-
+from __future__ import print_function
+from __future__ import division
+# 
 import mdtraj as md
 import numpy as np
+import itertools
+import Functions
+
 
 class Radou():
-    """Class for Radou-style analysis"""
+    """Class for Radou-style analysis. Initialises with a dictionary of default
+       parameters for analysis, accessible as Radou.params
+
+       Default parameters can either be updated directly in the Radou.params
+       dictionary or by supplying a extra parameters as kwargs during
+       initialisation, e.g.: Radou(cut_nc=1.0) or Radou(**param_dict)
+
+       Run a by-residue deuterated fraction prediction with these parameters
+       using the Radou.run method."""
 
     def __init__(self, **extra_params):
         """Initialises parameters for Radou-style analysis.
@@ -27,15 +40,16 @@ class Radou():
                         'times' : [ 0.167, 1.0, 10.0, 120.0],
                         'segfile' : "cropped_seg.list",
                         'logfile' : "HDX_analysis.log",
-                        'outprefix' : None }
+                        'outprefix' : '' }
         self.params.update(extra_params) # Update main parameter set from kwargs
 
-        # Default rate adjustments for adjacent amino acidsi
+        # Default rate adjustments for adjacent amino acids
         # Each key is a residue name, each value is [ lgAL, lgAR, lgBL, lgBR ]
         # Values from Bai et al., Proteins, 1993, 17, 75-86
 
         # Note that Englander has adjustments to Glu/Asp rates in spreadsheet
         # on his website, based on Mori et al., Proteins, 1997, 28, 325-332
+        # These are NOT included here by default
         rate_adjs = { 'ALA': [ 0.00, 0.00, 0.00, 0.00 ],
                       'ARG': [ -0.59, -0.32, 0.08, 0.22 ],
                       'ASN': [ -0.58, -0.13, 0.49, 0.32 ],
@@ -100,14 +114,14 @@ class Radou():
 
     def calc_contacts(self, qidx, cidx, cutoff):
         """Calculates contacts between 'query' and 'contact' atom selections
-           within a specified cutoff (default = 0.65, for coordinates in nm).
+           within a specified cutoff (in nm).
            Periodicity is included in MDtraj function by default.
            Usage: calc_contacts(qidx, cidx, cutoff).
 
            Qidx and cidx are the atom index lists to search for contacts from
            and to respectively (e.g. from amide NH to all heavy atoms).
 
-           Returns count of contacts for each frame in supplied trajectory."""
+           Returns count of contacts for each frame in trajectory Radou.t."""
 
         try:
             byframe_ctacts = md.compute_neighbors(self.t, cutoff, qidx, haystack_indices=cidx)
@@ -121,7 +135,7 @@ class Radou():
         """Calculates number of protein H-bonds for a particular atom index
            using the 'contacts' method. Bonds to all protein O* or N* evaluated
            by default, optionally all non-protein too (including waters) if 
-           Radou.params['protonly'] is True.
+           Radou.params['protonly'] is False.
        
            Usage: _calc_hbonds_contacts(atom)"""
 
@@ -135,16 +149,15 @@ class Radou():
         hbond_counts = self.calc_contacts(HN, c, self.params['cut_Nh'])
         return hbond_counts
 
-    def _calc_hbonds_bh(self, HN, minfreq=0.0, **kwargs):
+    def _calc_hbonds_bh(self, HN, minfreq=0.0):
         """Calculates number of protein H-bonds for a particular atom index
            using the 'Baker-Hubbard' method. Default donor-acceptor distance < 0.25 nm
-           + angle > 120 degrees.
+           + angle > 120 degrees in Radou.params.
            Reports all H-bonds (minimum freq=0.0) by default. Bonds to all protein 
            O* or N* evaluated by default, optionally all non-protein too 
-           (including waters) if Radou.params['protonly'] is True. For other kwargs
-           see mdtraj.geometry.hbond._get_bond_triplets or ..._compute_bounded_geometry.
+           (including waters) if Radou.params['protonly'] is False.
        
-           Usage: _calc_hbonds_bh(atom, [minfreq, **kwargs])
+           Usage: _calc_hbonds_bh(atom, [minfreq])
            Returns: n_frames length array of H-bond counts for desired atom"""
 
         # Atoms for H-bonds includes protein or all O*, N* and single HN hydrogen
@@ -157,7 +170,7 @@ class Radou():
         # Call internal functions of md.baker_hubbard directly to return
         # distances & angles, otherwise only bond_triplets averaged across
         # a trajectory are returned
-        bond_triplets = md.geometry.hbond._get_bond_triplets(c.topology, **kwargs)
+        bond_triplets = md.geometry.hbond._get_bond_triplets(c.topology, exclude_water=self.params['protonly'])
         mask, distances, angles = md.geometry.hbond._compute_bounded_geometry(c, bond_triplets,\
                                   self.params['bh_dist'], [1, 2], [0, 1, 2], freq=minfreq, periodic=True)
 
@@ -172,24 +185,25 @@ class Radou():
         hbond_counts = np.sum(np.logical_and(distances < self.params['bh_dist'], angles > ang_rad), axis=1)
         return hbond_counts
 
-    def calc_hbonds(self, donors, **kwargs):
+    def calc_hbonds(self, donors):
         """Calculates H-bond counts per frame for each atom in 'donors' array
            to each acceptor atom in the system. H-bonds can be defined using
-           any one of the methods below.
+           any one of the methods below, selected with Radou.params['hbond_method']
     
            Available methods:
               'contacts' : Distance-based cutoff of 0.24 nm 
               'bh'       : Baker-Hubbard distance ( < 0.25 nm) and angle ( > 120 deg) cutoff
 
-           Default cutoff/angle can be adjusted with the 'cutoff' and 'angle' kwargs
+           Default cutoff/angle can be adjusted with entries 'cut_Nh'/'bh_dist'/
+           'bh_ang'in Radou.params.
 
-           Usage: calc_hbonds(traj, method=['contacts','bh'], donors, [**kwargs])
+           Usage: calc_hbonds(donors)
            Returns: n_donors * n_frames 2D array of H-bond counts per frame for all donors"""
 
     # Switch for H-bond methods
         methods = {
-                   'contacts' : _calc_hbonds_contacts,
-                   'bh' : _calc_hbonds_bh
+                   'contacts' : self._calc_hbonds_contacts,
+                   'bh' : self._calc_hbonds_bh
                   }
 
         if self.params['skip_first']:
@@ -200,23 +214,24 @@ class Radou():
         except TypeError:
             total_counts = np.zeros((1, self.t.n_frames))
         for i, v in enumerate(donors):
-            total_counts[i] = methods[self.params['hbond_method']](v, **kwargs)
+            total_counts[i] = methods[self.params['hbond_method']](v)
 
         reslist = [ self.top.atom(a).residue.index for a in donors ]
 #        hbonds = np.concatenate((np.asarray([reslist]).reshape(len(reslist),1), total_counts), axis=1) # Array of [[ Res idx, Contact count ]]
 
         return np.asarray(reslist), total_counts
 
-    def calc_nh_contacts(reslist):
+    def calc_nh_contacts(self, reslist):
         """Calculates contacts between each NH atom and the surrounding heavy atoms,
            excluding those in residues n-2 to n+2.
     
-           By default contacts < 0.65 nm are calculated, and only protein-heavys,
-           are included, but can include all heavys if desired. Also skips first 
-           residue (N-terminus) in a residue list by default too.
+           By Radou.params default contacts < 0.65 nm are calculated, and only
+           protein-heavys, are included, but can include all heavys if desired.
+           Also skips first residue (N-terminus) in a residue list by default too
+           - see Radou.params['protonly'] and Radou.params['skip_first']
 
-           Usage: calc_nh_contacts(traj, reslist, [cutoff=0.65, skip_first=True, protein=True])
-           Returns: n_res x n_frames 2D array of contacts per frame for each residue in reslist"""
+           Usage: calc_nh_contacts(reslist)
+           Returns: (reslist, n_res x n_frames 2D array of contacts per frame for each residue)"""
 
         # Check if current atom is a heavy atom
         is_heavy = lambda _: self.top.atom(_).element.symbol is not 'H'
@@ -229,9 +244,7 @@ class Radou():
             robj = self.top.residue(res)
             excl_idxs = range(robj.index - 2, robj.index + 3, 1) # Exclude n-2 to n+2 residues
 
-### *** ### Calls external (select_residxs)
-            inv_atms = select_residxs(self.t, excl_idxs, protonly=self.params['protonly'], invert=True) # At this stage includes H + heavys
-### *** ###
+            inv_atms = Functions.select_residxs(self.t, excl_idxs, protonly=self.params['protonly'], invert=True) # At this stage includes H + heavys
             heavys = inv_atms[ np.array( [ is_heavy(i) for i in inv_atms ] ) ] # Filter out non-heavys
 
             contact_count[idx] = self.calc_contacts(robj.atom('N').index, heavys, cutoff=self.params['cut_Nc'])
@@ -239,33 +252,33 @@ class Radou():
 #        contacts = np.concatenate((np.asarray([reslist]).reshape(len(reslist),1), contact_count), axis=1) # Array of [[ Res idx, Contact count ]]
         return np.asarray(reslist), contact_count
 
-    def PF(self, **kwargs):
+    def PF(self):
         """Calculates Radou et al. protection factors for a provided trajectory.
-           Empirical scaling factors of Nh * 2.0 and Nc * 0.35, as per Radou et al.
-           H-bonds can be calculated using either the 'contacts' definition (all
-           acceptors within 0.24 nm by default) or the Baker-Hubbard distance +
-           angle definition (0.25 nm / 120 deg by default). Printout of temporary
-           files containing by-residue contacts can be enabled with save_contacts.
+           Empirical scaling factors of Nh * betah and Nc * betac taken from 
+           Radou.params (2.0 & 0.35 respectively by default).
+           H-bonds can be calculated using either the 'contacts' definition or
+           the Baker-Hubbard distance + angle definition. Printout of temporary
+           files containing by-residue contacts can be enabled/disabled with 
+           Radou.params['save_contacts'].
 
            All proline residues and the N-terminal residue are skipped. See 
            calc_hbonds and calc_nh_contacts for optional kwargs.       
 
-           Usage: PF(traj, [ hbond_method=['contacts','bh'], save_contacts=False, **kwargs ])
+           Usage: PF()
        
            Returns: (array of residue indices, array of mean protection factors)"""
-### *** ### calls extract_HN/list_prolines
         # Setup residue/atom lists        
-        hn_atms = extract_HN(self.t)
-        prolines = list_prolines(self.t)
+        hn_atms = Functions.extract_HN(self.t, log=self.params['logfile'])
+        prolines = Functions.list_prolines(self.t, log=self.params['logfile'])
         # All protein residues except prolines
         reslist = [ r.index for r in self.top.residues if r.is_protein and r.index not in prolines[:,1] ]
 
         # Calc Nc/Nh
-        hres, hbonds = self.calc_hbonds(hn_atms, **kwargs)
+        hres, hbonds = self.calc_hbonds(hn_atms)
         cres, contacts = self.calc_nh_contacts(reslist)
 
         if not np.array_equal(hres, cres):
-            raise HDX_Error("The residues analysed for Nc and Nh appear to be different. Check your inputs!")
+            raise Functions.HDX_Error("The residues analysed for Nc and Nh appear to be different. Check your inputs!")
 
         # Option to save outputs
         if self.params['save_contacts']:
@@ -290,7 +303,7 @@ class Radou():
         """Calculates omega dihedrals (CA-C-N-CA) for all proline
            residues in a given prolines array from list_prolines.
     
-           Usage: pro_omega_indices(traj, prolines)
+           Usage: pro_omega_indices(prolines)
            Returns: (atom_indices, w_angles_by_frame)"""
 
         atom_names = ['CA', 'C', 'N', 'CA']
@@ -314,11 +327,10 @@ class Radou():
     # 4) N/C termini
 
     def assign_cis_proline(self):
-        """Assigns cis-proline residues"""
+        """Assigns cis-proline residues on a by-frame basis"""
 
-### *** ### calls list_prolines
-        prolines = list_prolines(self.t)
-        outidxs, outangs = pro_omega_indices(prolines)
+        prolines = Functions.list_prolines(self.t, log=self.params['logfile'])
+        outidxs, outangs = self.pro_omega_indices(prolines)
         for i, proidx in enumerate(prolines[:,1]):
             self.top.residue(proidx).cis_byframe = np.logical_and(outangs < np.pi/2, outangs > -1*np.pi/2)[:,i]
             if np.max(self.top.residue(proidx).cis_byframe) > 0:
@@ -333,7 +345,7 @@ class Radou():
         try:
             sg_coords = self.t.atom_slice(sg).xyz
         except IndexError: # Catch empty sg
-            with open(log, 'a') as f:
+            with open(self.params['logfile'], 'a') as f:
                 f.write("No cysteines found in topology.\n")
             return
         self.top.create_standard_bonds()
@@ -359,13 +371,12 @@ class Radou():
                     f.write("Protonated His assigned for residue %d\n" % self.top.residue(i).resSeq)
 #            else:
 #                self.top.residue(i).HIP = np.zeros(self.t.n_frames, dtype=bool)
-##  *** ### calls extract_HN/list_prolines
 
     def assign_termini(self):
         """Assigns flags to N and C terminal residues"""
 
         for c in self.top.chains:
-            c.residue(0).nterm = np.ones(selft.n_frames, dtype=bool)
+            c.residue(0).nterm = np.ones(self.t.n_frames, dtype=bool)
             c.residue(-1).cterm = np.ones(self.t.n_frames, dtype=bool)
             with open(self.params['logfile'], 'a') as f:
                 f.write("N-terminus identified at: %s\nC-terminus identified at: %s\n" \
@@ -374,24 +385,28 @@ class Radou():
 
     # Helper function to turn sequence-specific rate adjustments to intrinsic acid/base/water rates
     def _adj_to_rates(self, rate_adjs):
-        """Calculates intrinsic rates for a given set of rate adjustments
-           [ log(AL), log(BL), log(AR), log(BR) ] taken from Bai et al."""
+        """Helper function for kint().
+           Calculates intrinsic rates for a given set of rate adjustments
+           [ log(AL), log(BL), log(AR), log(BR) ] taken from Bai et al.
+
+           Usage: _adj_to_rates(rate_adjs)
+           Returns: intrinsic_rate"""
 
         # Calc reference rates at experimental temperature
         # / np.log(10) = conversion from ln to log10
-        lgkAexp = self.params['rate_params']['lgkAref'] - (self.params['rate_params']['EaA'] \
-                  /  np.log(10) / self.params['rate_params']['R']) * \
-                  (1./self.params['rate_params']['Texp'] - 1./self.params['rate_params']['Tref'])
-        lgkBexp = self.params['rate_params']['lgkBref'] - (self.params['rate_params']['EaB'] \
-                  /  np.log(10) / self.params['rate_params']['R']) * \
-                  (1./self.params['rate_params']['Texp'] - 1./self.params['rate_params']['Tref'])
-        lgkWexp = self.params['rate_params']['lgkWref'] - (self.params['rate_params']['EaW'] \
-                  /  np.log(10) / self.params['rate_params']['R']) * \
-                  (1./self.params['rate_params']['Texp'] - 1./self.params['rate_params']['Tref'])
+        lgkAexp = self.params['kint_params']['lgkAref'] - (self.params['kint_params']['EaA'] \
+                  /  np.log(10) / self.params['kint_params']['R']) * \
+                  (1./self.params['kint_params']['Texp'] - 1./self.params['kint_params']['Tref'])
+        lgkBexp = self.params['kint_params']['lgkBref'] - (self.params['kint_params']['EaB'] \
+                  /  np.log(10) / self.params['kint_params']['R']) * \
+                  (1./self.params['kint_params']['Texp'] - 1./self.params['kint_params']['Tref'])
+        lgkWexp = self.params['kint_params']['lgkWref'] - (self.params['kint_params']['EaW'] \
+                  /  np.log(10) / self.params['kint_params']['R']) * \
+                  (1./self.params['kint_params']['Texp'] - 1./self.params['kint_params']['Tref'])
 
         # Calc log(kA||kB||kW)
-        lgkA = lgkAexp + rate_adjs[0] + rate_adjs[2] - self.params['rate_params']['pD']
-        lgkB = lgkBexp + rate_adjs[1] + rate_adjs[3] - self.params['rate_params']['pKD'] + self.params['rate_params']['pD']
+        lgkA = lgkAexp + rate_adjs[0] + rate_adjs[2] - self.params['kint_params']['pD']
+        lgkB = lgkBexp + rate_adjs[1] + rate_adjs[3] - self.params['kint_params']['pKD'] + self.params['kint_params']['pD']
         lgkW = lgkWexp + rate_adjs[1] + rate_adjs[3]
 
         kint = 10**lgkA + 10**lgkB + 10**lgkW
@@ -408,9 +423,15 @@ class Radou():
            lgk_A = lgk_A,ref + lgA_L + lgA_R - pD
            lgk_B = lgk_B,ref + lgB_L + lgB_R - pOD
                  = lgk_B,ref + lgB_L + lgB_R - pK_D + pOD
-           lgk_W = lgk_W,ref + lgB_L + lgB_R"""
-        # Create tmp copy of topology to adjust residue names
-#        tmptop = traj.topology.copy()
+           lgk_W = lgk_W,ref + lgB_L + lgB_R
+
+           Default parameters for the above can be modified in the 
+           Radou.params['kint_params'] dictionary. Sequence-based
+           rate adjustments can be modified in the 'kint_adjs' and
+           '_reordered_kint_adjs' dictionaries.
+
+           Usage: kint()
+           Returns: array of by-residue intrinsic rates"""
 
         kints = np.zeros(len(self.reslist))
 
@@ -432,25 +453,25 @@ class Radou():
             except AttributeError:
                 pass
             try:
-            if np.max(curr.disulf): # If Cys-Cys is true for any frame
-                curr.name = 'CYS2'
-                continue
+                if np.max(curr.disulf): # If Cys-Cys is true for any frame
+                    curr.name = 'CYS2'
+                    continue
             except AttributeError:
                 pass
             if curr.name == 'GLU': # If Glu has a protonated carboxylate
-            try:
-                curr.atom('HE2')
-                curr.name = 'GLH'
-                continue
-            except KeyError:
-                pass
-        if curr.name == 'ASP': # If Asp has a protonated carboxylate
-            try:
-                curr.atom('HD2')
-                curr.name = 'ASH'
-                continue
-            except KeyError:
-                pass
+                try:
+                    curr.atom('HE2')
+                    curr.name = 'GLH'
+                    continue
+                except KeyError:
+                     pass
+            if curr.name == 'ASP': # If Asp has a protonated carboxylate
+                try:
+                    curr.atom('HD2')
+                    curr.name = 'ASH'
+                    continue
+                except KeyError:
+                    pass
 
         # Assign N/C termini
         for chain in self.top.chains:
@@ -463,6 +484,14 @@ class Radou():
                 chain.residue(-1).name = 'CT'
 
         reslist = np.delete(reslist, 0) # Remove i-1 residue we inserted above
+        try:
+            if all(reslist == self.reslist):
+                pass
+            else:
+                raise Functions.HDX_Error("Your residue lists for protection factors and intrinsic rates are different. Check your inputs!")
+        except AttributeError:
+            print("Please generate protection factors before running intrinsic rate calculations.")
+            return
         for i, r in enumerate(reslist):
             curr = self.top.residue(r)
             prev = self.top.residue(r-1)
@@ -473,34 +502,34 @@ class Radou():
                 adj_cis, adj_trans = self.params['_reordered_kint_adjs'][curr.name][0:2], self.params['_reordered_kint_adjs'][curr.name][0:2]
                 adj_cis.extend(self.params['_reordered_kint_adjs']['PROC'][2:4])
                 adj_trans.extend(self.params['_reordered_kint_adjs']['PRO'][2:4])
-                kint_cis = _adj_to_rates(adj_cis)
-                kint_trans = _adj_to_rates(adj_trans)
+                kint_cis = self._adj_to_rates(adj_cis)
+                kint_trans = self._adj_to_rates(adj_trans)
                 kint_byframe = np.where(prev.cis_byframe, kint_cis, kint_trans)
                 kints[i] = np.mean(kint_byframe) # Overall intrinsic rate is adjusted by mean population of cis-pro
             else:
                 curr_adjs = self.params['_reordered_kint_adjs'][curr.name][0:2]
                 curr_adjs.extend(self.params['_reordered_kint_adjs'][prev.name][2:4])
-                kints[i] = _adj_to_rates(curr_adjs)
+                kints[i] = self._adj_to_rates(curr_adjs)
 
             rids = np.asarray([ self.top.residue(i).resSeq for i in reslist ])
             # Save PFs to separate log file
-            np.savetxt("Intrinsic_rates.tmp", np.stack((rids, kints), axis=1), \
+            np.savetxt(self.params['outprefix']+"Intrinsic_rates.tmp", np.stack((rids, kints), axis=1), \
                        fmt=['%7d','%18.8f'], header="ResID  Intrinsic rate ") # Use residue indices internally, print out IDs
 
-        return kints, reslist
+        return kints
 
     # Deuterated fration by residue
     def dfrac(self):
-        """Function for calculating deuterated fractions of a list
-           of residues, given a set of Protection factors, intrinsic
-           rates, and exposure times.
+        """Function for calculating by-residue deuterated fractions, for
+           a set of Protection factors, intrinsic rates, and exposure times
+           previously defined for the current Radou object.
 
-           Usage: dfrac(traj, reslist, pfs, kints, times)
+           Usage: dfrac()
            Returns: [n_residues, n_times] 2D numpy array of deuterated fractions"""
 
 
-        if len(set(map(len,[self.reslist, self.pfs, self.kints]))) != 1: # Check that all lengths are the same (set length = 1)
-            raise HDX_Error("Can't calculate deuterated fractions, your residue/protection factor/rates arrays are not the same length.")
+        if len(set(map(len,[self.reslist, self.pfs, self.rates]))) != 1: # Check that all lengths are the same (set length = 1)
+            raise Functions.HDX_Error("Can't calculate deuterated fractions, your residue/protection factor/rates arrays are not the same length.")
 
         try:
             fracs = np.zeros((len(self.reslist), len(self.params['times'])))
@@ -509,29 +538,30 @@ class Radou():
         for i2, t in enumerate(self.params['times']):
             def _residue_fraction(pf, k, time=t):
                 return 1 - np.exp(-k / pf * time)
-            for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, self.pfs, self.kints)):
+            for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, self.pfs, self.rates)):
                 fracs[i1,i2] = curr_frac
 
-        rids = np.asarray([ self.top.residue(i).resSeq for i in reslist ])
-        np.savetxt("Residue_fractions.tmp", np.hstack((np.reshape(rids, (len(reslist),1)), fracs)), \
+        rids = np.asarray([ self.top.residue(i).resSeq for i in self.reslist ])
+        np.savetxt(self.params['outprefix']+"Residue_fractions.tmp", np.hstack((np.reshape(rids, (len(self.reslist),1)), fracs)), \
                    fmt='%7d ' + '%8.5f '*len(self.params['times']), header="ResID  Deuterated fraction, Times / min: %s"  \
                    % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
         return fracs
 
+    def run(self, trajectory):
+        """Runs a by-residue HDX prediction for the provided MDTraj trajectory
 
-
-
-
-
-    def run(trajectory):
-        """Runs a by-residue HDX prediction for the provided trajectory"""
+           Usage: run(traj)
+           Returns: None (results are stored as Radou.resfracs)"""
         self.t = trajectory # Note this will add attributes to the original trajectory, not a copy
         self.top = trajectory.topology.copy() # This does not add attributes to the original topology
-        assign_cis_proline()
-        assign_disulfide(self.t, log=self.params['logfile'])
-        assign_his_protonation(self.t, log=self.params['logfile'])
-        assign_termini(self.t, log=self.params['logfile'])
-        self.reslist, self.pfs = PF(self.t, self.params['hbond_method'], self.params['save_contacts'],)
+        self.assign_cis_proline()
+        self.assign_disulfide()
+        self.assign_his_protonation()
+        self.assign_termini()
+        self.reslist, self.pfs = self.PF()
                                    
-        k, r = kint(protcurr, hres)
-        fracs += dfrac(protlipcurr, hres, pf, k, times)
+        self.rates = self.kint()
+        self.resfracs = self.dfrac()
+        print("Residue predictions complete")
+
+### Add further classes for methods below here
