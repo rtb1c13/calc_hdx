@@ -485,7 +485,7 @@ class Radou():
 
         reslist = np.delete(reslist, 0) # Remove i-1 residue we inserted above
         try:
-            if all(reslist == self.reslist):
+            if np.array_equal(reslist, self.reslist):
                 pass
             else:
                 raise Functions.HDX_Error("Your residue lists for protection factors and intrinsic rates are different. Check your inputs!")
