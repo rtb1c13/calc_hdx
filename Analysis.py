@@ -113,7 +113,7 @@ class Analyze():
                 idxs = np.where(np.logical_and( self.reslist > start, self.reslist <= end ))[0] # > s[0] skips the first residue in segment
                 aves[i1, i2] = np.mean(self.resfracs[idxs, i2])
 
-        np.savetxt("Segment_average_fractions.tmp", np.hstack((self.segres, aves)), \
+        np.savetxt(self.params['outprefix']+"Segment_average_fractions.tmp", np.hstack((self.segres, aves)), \
                    fmt='%6d %6d ' + '%8.5f '*len(self.params['times']), header="Res 1   Res2  Times / min: %s" \
                    % ' '.join([ str(t) for t in self.params['times'] ]))
         with open(self.params['logfile'], 'a') as f:
