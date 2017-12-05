@@ -14,7 +14,7 @@ import mdtraj as md
 import sys, ast
 import argparse
 # 
-import Functions, Methods
+import Functions, Methods, Analysis
 
 
 ### Argparser ###
@@ -22,14 +22,16 @@ def parse():
     parser = argparse.ArgumentParser()
     parser.add_argument("-t","--traj",help="Trajectory/ies for analysis",nargs='+',type=str, required=True)
     parser.add_argument("-p","--parm",help="Topology file to be used for analysis",type=str, required=True)
-    parser.add_argument("-s","--stride",help="Stride at which to read the trajectory. Default = 1 (every frame)", nargs=1, type=int, default=1)
+    parser.add_argument("-s","--stride",help="Stride at which to read the trajectory. Default = 1 (every frame)", type=int, default=1)
     parser.add_argument("-c","--chunks",help="If set, trajectory will be read in chunks of this size (lowers memory requirements for large trajectories). Default = 1000", nargs='?', type=int, const=1000)
     parser.add_argument("-m","--method",help="Method for analysis. Currently 'Radou' is the only option", choices=['Radou'], default='Radou', required=True)
     parser.add_argument("-dt","--times",help="Times for analysis, in minutes. Defaults to [ 0.167, 1.0, 10.0, 120.0 ]", nargs='+', default=[0.167, 1.0, 10.0, 120.0])
     parser.add_argument("-log","--logfile",help="Name of logfile for printout of run info. Defaults to 'HDX_analysis.log'", type=str, default='HDX_analysis.log')
     parser.add_argument("-seg","--segfile",help="Name of file with segment definitions for analysis. Segments should be defined one per line, with starting/finishing residues whitespace separated. Defaults to 'cropped_seg.list'",type=str, default='cropped_seg.list')
+    parser.add_argument("-exp","--expfile",help="Name of file with experimental deuterated fractions. Segments should be identical to those in segfile, defined one per line, followed by one column for each timepoint in --times. Whitespace separated. No default.")
     parser.add_argument("-out","--outprefix",help="Prefix for prediction output files",type=str, default='')
-    parser.add_argument("-opt","--method_options",help="Additional method options. Should be provided as a single string in Python dictionary format, e.g.:  '{ 'hbond_method' : 'contacts', 'cut_Nc' : 0.70, 'save_contacts' : True }' (Note the string must be enclosed in quotes)",type=str)
+    parser.add_argument("-mopt","--method_options",help="Additional method options. Should be provided as a single string in Python dictionary format, e.g.:  '{ 'hbond_method' : 'contacts', 'cut_Nc' : 0.70, 'save_contacts' : True }' (Note the string must be enclosed in quotes)",type=str)
+    parser.add_argument("-aopt","--analysis_options",help="Additional analysis options. Should be provided as a single string in Python dictionary format, e.g.:  '{ 'figs' : True }' (Note the string must be enclosed in quotes)",type=str)
 
     if len(sys.argv)==1:
         parser.print_help()
@@ -96,6 +98,7 @@ def _update_options(opts, **updates):
 if __name__ == '__main__':
     global args    
     args = parse()
+    ### Prediction
     if args.method_options is not None:
         _update_options(args.method_options, logfile=args.logfile, \
                         segfile=args.segfile, outprefix=args.outprefix,\
@@ -109,4 +112,15 @@ if __name__ == '__main__':
         results = chunks(args.traj, args.parm, args.stride, args.chunks, args.method, args.method_options)
     else:
         results = full(args.traj, args.parm, args.stride, args.method, args.method_options)
-        
+    ### Analysis
+    if args.analysis_options is not None:
+        _update_options(args.analysis_options, logfile=args.logfile, \
+                        segfile=args.segfile, expfile=args.expfile, \
+                        outprefix=args.outprefix, times=args.times)
+    else:
+        args.analysis_options = {}
+        _update_options(args.analysis_options, logfile=args.logfile, \
+                        segfile=args.segfile, expfile=args.expfile,
+                        outprefix=args.outprefix, times=args.times)
+    analysis = Analysis.Analyze(results, results.top, **args.analysis_options)
+    analysis.run()
