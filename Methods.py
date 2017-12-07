@@ -186,7 +186,7 @@ class Radou():
         if self.params['protonly']:
             c = self.t.atom_slice(self.top.select("protein and (symbol O or symbol N) or index %s" % HN))
         else:
-            c = self.t.atom_slice(self.top.select("all (symbol O or symbol N) or index %s" % HN))
+            c = self.t.atom_slice(self.top.select("(symbol O or symbol N) or index %s" % HN))
 
         # Call internal functions of md.baker_hubbard directly to return
         # distances & angles, otherwise only bond_triplets averaged across
