@@ -19,7 +19,13 @@ class Analyze():
             self.top = top
         except AttributeError:
             raise Functions.HDX_Error("Error when copying results from prediction to analysis objects - have you made any HDX predictions yet?")
-        self.params = extra_params
+        self.params = resobj.params
+        try:
+            self.params.update(extra_params)
+        except (TypeError,ValueError):
+            print("Couldn't load extra parameters for analysis (maybe they weren't provided?).\nUsing previous parameters from %s object." % resobj)
+                   
+ #TODO if extra_params is None, get params from resobj
 
 
 
@@ -69,7 +75,7 @@ class Analyze():
            N/C terminus), the next residue is chosen as the start/end point instead.
  
            Writes info on skipped residues to logfile "HDX_analysis.log" by default
-           and the segment/average deuteration information to "Segment_average_fractions.tmp"
+           and the segment/average deuteration information to "Segment_average_fractions.dat"
 
            Usage: segments(traj, reslist, fracs, segfile_name, times, [ log="HDX_analysis.log" ])
            Returns: [n_segs, 2] 2D numpy array of segment start/end residue IDs, 
@@ -113,7 +119,7 @@ class Analyze():
                 idxs = np.where(np.logical_and( self.reslist > start, self.reslist <= end ))[0] # > s[0] skips the first residue in segment
                 aves[i1, i2] = np.mean(self.resfracs[idxs, i2])
 
-        np.savetxt(self.params['outprefix']+"Segment_average_fractions.tmp", np.hstack((self.segres, aves)), \
+        np.savetxt(self.params['outprefix']+"Segment_average_fractions.dat", np.hstack((self.segres, aves)), \
                    fmt='%6d %6d ' + '%8.5f '*len(self.params['times']), header="Res 1   Res2  Times / min: %s" \
                    % ' '.join([ str(t) for t in self.params['times'] ]))
         with open(self.params['logfile'], 'a') as f:

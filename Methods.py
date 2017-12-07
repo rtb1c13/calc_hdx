@@ -6,7 +6,7 @@ from __future__ import division
 # 
 import mdtraj as md
 import numpy as np
-import itertools
+import os, glob, itertools
 import Functions
 
 
@@ -112,6 +112,27 @@ class Radou():
             rate_params.update(self.params['kint_params'])
         self.params['kint_params'] = rate_params
 
+    def __str__(self):
+        """Print the method name"""
+        return 'Radou'
+
+    def __iadd__(self, other):
+        """Sum results in other method object to this one, weighted by number of frames in each"""
+        if isinstance(other, Radou):
+            try:
+                if np.array_equal(self.rates, other.rates):
+                    self.pfs = (self.n_frames * self.pfs) + (other.n_frames * other.pfs)
+                    self.n_frames += other.n_frames
+                    self.pfs /= self.n_frames
+                    self.resfracs = self.dfrac(write=False)
+                    return self
+                else:
+                    raise Functions.HDX_Error("Cannot sum two Radou objects with different intrinsic rates.")
+            except AttributeError:
+                return self
+        else:
+            return self
+
     def calc_contacts(self, qidx, cidx, cutoff):
         """Calculates contacts between 'query' and 'contact' atom selections
            within a specified cutoff (in nm).
@@ -126,7 +147,7 @@ class Radou():
         try:
             byframe_ctacts = md.compute_neighbors(self.t, cutoff, qidx, haystack_indices=cidx)
         except TypeError:
-            print("Now calculating contacts to single atom, idx %d" % qidx)
+#            print("Now calculating contacts to single atom, idx %d" % qidx)
             qidx = np.array([qidx])
             byframe_ctacts = md.compute_neighbors(self.t, cutoff, qidx, haystack_indices=cidx)
         return map(lambda x: len(x), byframe_ctacts)
@@ -144,7 +165,7 @@ class Radou():
         if self.params['protonly']:
             c = self.top.select("protein and (symbol O or symbol N) and not index %s" % getN4H(HN))
         else:
-            c = self.top.select("all (symbol O or symbol N) and not index %s" % getN4H(HN))
+            c = self.top.select("(symbol O or symbol N) and not index %s" % getN4H(HN))
 
         hbond_counts = self.calc_contacts(HN, c, self.params['cut_Nh'])
         return hbond_counts
@@ -287,15 +308,21 @@ class Radou():
             for i, residx in enumerate(cres):
                 np.savetxt("Contacts_%d.tmp" % self.top.residue(residx).resSeq, contacts[i], fmt='%d') # Use residue indices internally, print out IDs
         # Calc PF with phenomenological equation
-        hbonds *= self.params['betah']        # Beta parameter 1
+        hbonds *= self.params['betah']     # Beta parameter 1
         contacts *= self.params['betac']   # Beta parameter 2
     
         pf = np.exp(hbonds + contacts)
         pf = np.mean(pf, axis=1)
         rids = np.asarray([ self.top.residue(i).resSeq for i in hres ])
-        # Save PFs to separate log file
-        np.savetxt(self.params['outprefix']+"Protection_factors.tmp", np.stack((rids, pf), axis=1), \
-                   fmt=['%7d','%18.8f'], header="ResID  Protection factor") # Use residue indices internally, print out IDs
+        # Save PFs to separate log file, appending filenames for trajectories read as chunks
+        if os.path.exists(self.params['outprefix']+"Protection_factors.dat"):
+            filenum = len(glob.glob(self.params['outprefix']+"Protection_factors*"))
+            np.savetxt(self.params['outprefix']+"Protection_factors_chunk_%d.dat" % (filenum+1), \
+                       np.stack((rids, pf), axis=1), fmt=['%7d','%18.8f'], \
+                       header="ResID  Protection factor") # Use residue indices internally, print out IDs
+        else:    
+            np.savetxt(self.params['outprefix']+"Protection_factors.dat", np.stack((rids, pf), axis=1), \
+                       fmt=['%7d','%18.8f'], header="ResID  Protection factor") # Use residue indices internally, print out IDs
 
         return hres, pf
 
@@ -477,11 +504,16 @@ class Radou():
         for chain in self.top.chains:
             chain.residue(0).name = 'NT'
             # Doesn't appead to be a standard name for COOH hydrogen - guess based on no. of bonds!
-            if chain.residue(-1).atom('O').n_bonds > 1 or chain.residue(-1).atom('OXT').n_bonds > 1:
-                chain.residue(-1).name = 'CTH'
-                print("It looks like you have a neutral C-terminus (COOH) at residue %s?" % chain.residue(-1))
-            else:
-                chain.residue(-1).name = 'CT'
+            try:
+                if chain.residue(-1).atom('O').n_bonds > 1 or chain.residue(-1).atom('OXT').n_bonds > 1:
+                    chain.residue(-1).name = 'CTH'
+                    with open(self.params['logfile'], 'a') as f:
+                        f.write("It looks like you have a neutral C-terminus (COOH) at residue %s?\n" % chain.residue(-1))
+                else:
+                    chain.residue(-1).name = 'CT'
+            except KeyError:
+                with open(self.params['logfile'], 'a') as f:
+                    f.write("Residue %s at the end of a chain doesn't seem to have atoms named 'O'/'OXT'.\nI'm not treating it as a C-terminus.\n" % chain.residue(-1))
 
         reslist = np.delete(reslist, 0) # Remove i-1 residue we inserted above
         try:
@@ -512,14 +544,20 @@ class Radou():
                 kints[i] = self._adj_to_rates(curr_adjs)
 
             rids = np.asarray([ self.top.residue(i).resSeq for i in reslist ])
-            # Save PFs to separate log file
-            np.savetxt(self.params['outprefix']+"Intrinsic_rates.tmp", np.stack((rids, kints), axis=1), \
-                       fmt=['%7d','%18.8f'], header="ResID  Intrinsic rate ") # Use residue indices internally, print out IDs
+            # Save Kints to separate log file, appending filenames for trajectories read as chunks
+        if os.path.exists(self.params['outprefix']+"Intrinsic_rates.dat"):
+            filenum = len(glob.glob(self.params['outprefix']+"Intrinsic_rates*"))
+            np.savetxt(self.params['outprefix']+"Intrinsic_rates_chunk_%d.dat" % (filenum+1), \
+                       np.stack((rids, kints), axis=1), fmt=['%7d','%18.8f'], \
+                       header="ResID  Intrinsic rate / min^-1 ") # Use residue indices internally, print out IDs
+        else:    
+            np.savetxt(self.params['outprefix']+"Intrinsic_rates.dat", np.stack((rids, kints), axis=1), \
+                       fmt=['%7d','%18.8f'], header="ResID  Intrinsic rate / min^-1 ") # Use residue indices internally, print out IDs
 
         return kints
 
     # Deuterated fration by residue
-    def dfrac(self):
+    def dfrac(self, write=True):
         """Function for calculating by-residue deuterated fractions, for
            a set of Protection factors, intrinsic rates, and exposure times
            previously defined for the current Radou object.
@@ -542,9 +580,21 @@ class Radou():
                 fracs[i1,i2] = curr_frac
 
         rids = np.asarray([ self.top.residue(i).resSeq for i in self.reslist ])
-        np.savetxt(self.params['outprefix']+"Residue_fractions.tmp", np.hstack((np.reshape(rids, (len(self.reslist),1)), fracs)), \
-                   fmt='%7d ' + '%8.5f '*len(self.params['times']), header="ResID  Deuterated fraction, Times / min: %s"  \
-                   % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
+        # Write resfracs to separate file, appending filenames for trajectories read as chunks
+        if write:
+            if os.path.exists(self.params['outprefix']+"Residue_fractions.dat"):
+                filenum = len(glob.glob(self.params['outprefix']+"Residue_fractions*"))
+                np.savetxt(self.params['outprefix']+"Residue_fractions_chunk_%d.dat" % (filenum+1), \
+                           np.hstack((np.reshape(rids, (len(self.reslist),1)), fracs)), \
+                           fmt='%7d ' + '%8.5f '*len(self.params['times']), \
+                           header="ResID  Deuterated fraction, Times / min: %s" \
+                           % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
+            else:    
+                np.savetxt(self.params['outprefix']+"Residue_fractions.dat", \
+                           np.hstack((np.reshape(rids, (len(self.reslist),1)), fracs)), \
+                           fmt='%7d ' + '%8.5f '*len(self.params['times']), \
+                           header="ResID  Deuterated fraction, Times / min: %s" \
+                           % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
         return fracs
 
     def run(self, trajectory):
@@ -553,6 +603,7 @@ class Radou():
            Usage: run(traj)
            Returns: None (results are stored as Radou.resfracs)"""
         self.t = trajectory # Note this will add attributes to the original trajectory, not a copy
+        self.n_frames = self.t.n_frames
         self.top = trajectory.topology.copy() # This does not add attributes to the original topology
         self.assign_cis_proline()
         self.assign_disulfide()

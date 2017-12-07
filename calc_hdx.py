@@ -22,8 +22,11 @@ def parse():
     parser = argparse.ArgumentParser()
     parser.add_argument("-t","--traj",help="Trajectory/ies for analysis",nargs='+',type=str, required=True)
     parser.add_argument("-p","--parm",help="Topology file to be used for analysis",type=str, required=True)
-    parser.add_argument("-s","--stride",help="Stride at which to read the trajectory. Default = 1 (every frame)", type=int, default=1)
+    parser.add_argument("-s","--start",help="Frame at which to start (inclusive) reading each trajectory. Default = 1 (every frame)", type=int, default=1)
+    parser.add_argument("-e","--end",help="Frame at which to end (inclusive) reading each trajectory. Default = final frame", type=int)
+    parser.add_argument("-str","--stride",help="Stride at which to read the trajectory. Default = 1 (every frame)", type=int, default=1)
     parser.add_argument("-c","--chunks",help="If set, trajectory will be read in chunks of this size (lowers memory requirements for large trajectories). Default = 1000", nargs='?', type=int, const=1000)
+    parser.add_argument("-sel","--select",help="MDTraj format selection string for atoms to select for analysis from trajectories. Default = 'all'", default='all')
     parser.add_argument("-m","--method",help="Method for analysis. Currently 'Radou' is the only option", choices=['Radou'], default='Radou', required=True)
     parser.add_argument("-dt","--times",help="Times for analysis, in minutes. Defaults to [ 0.167, 1.0, 10.0, 120.0 ]", nargs='+', default=[0.167, 1.0, 10.0, 120.0])
     parser.add_argument("-log","--logfile",help="Name of logfile for printout of run info. Defaults to 'HDX_analysis.log'", type=str, default='HDX_analysis.log')
@@ -50,6 +53,17 @@ def parse():
     return args
 
 ### Main prediction functions ###
+def _get_method(name):
+    """Choose a method to run based on a string"""
+    # Switch for methods (add new ones here):
+    methods = { 'radou' : Methods.Radou }
+
+    return methods[name.lower()]
+    
+def _update_options(opts, **updates):
+    """Updates options dictionary with extra kwargs"""
+    opts.update(updates)
+
 def predict(traj, method, opts):
     """Predicts fraction of deuterium exchange for residues in the given
        trajectory, using the given method and dictionary of options.
@@ -57,47 +71,51 @@ def predict(traj, method, opts):
        Usage: predict(traj, method, options)
        Returns: Object of desired method class, with completed HDX predictions"""
 
-    # Switch for methods (add new ones here):
-    methods = { 'radou' : Methods.Radou }
 
-    result = methods[method.lower()](**opts)
+    result = _get_method(method)(**opts)
     result.run(traj)
     return result
 
-def full(trajlist, parm, stride, method, opts):
+def full(trajlist, parm, start, stop, stride, select, method, opts):
     """Loads all trajectories in the given list and performs HDX predictions.
+       'slicelist' is a list of indices for slicing the trajectory
 
-       Usage: full(trajlist, parm, stride, method, options)
+       Usage: full(trajlist, parm, slicelist, method, options)
        Returns: Object of desired method class, with completed HDX predictions"""
 
-    t = Functions.load_fulltraj(trajlist, parm=parm, stride=stride)
-    return predict(t, method, opts)   
+    t = Functions.load_fulltraj(trajlist, parm=parm, start=start, stop=stop, stride=stride)
+    tslice = Functions.select(t, select)
+    return predict(tslice, method, opts)   
 
-def chunks(trajlist, parm, stride, chunksize, method, opts):
+def chunks(trajlist, parm, start, stop, stride, select, chunksize, method, opts):
     """Loads trajectories in the given list in chunks and performs HDX predictions.
 
        Usage: chunks(trajlist, parm, stride, chunksize, method, options)
-       Returns: Object of desired method class, with completed HDX predictions"""
-
-### Posibly rewrite this to sum result classes together into single object? '+=' = __iadd__(self,other)
+       Returns: Object of desired method class, with completed HDX predictions summed over all frames"""
 
     resultlist = []
     for t in trajlist:
-        t_gen = Functions.load_trajchunks(t, parm=parm, stride=stride, chunk=chunksize)
-        for t_chunk in t_gen:
-            resultlist.append(predict(t_chunk, method, opts))
-
-    return resultlist
-
-def _update_options(opts, **updates):
-    """Updates options dictionary with extra kwargs"""
-    opts.update(updates)
+        if stop is None:
+            stop = sum(t.n_frames*stride for t in Functions.load_trajchunks(t, parm=parm, stride=stride, chunk=chunksize))
+        t_gen = Functions.load_trajchunks(t, parm=parm, start=start, stride=stride, chunk=chunksize)
+        f_to_yield = stop - (start - 1)
+        # Sums generator with __iadd__ of desired method
+        resultlist.append(reduce(_get_method(method).__iadd__, \
+                                 (predict(Functions.select(t_chunk, select), method, opts) for t_chunk in \
+                                 Functions.itertraj_slice(t_gen, chunksize, f_to_yield, stride=stride))))
+    summed = resultlist.pop(0)
+    for r in resultlist:
+        summed += r
+    return summed
 
 
 ### Main below here
 if __name__ == '__main__':
     global args    
     args = parse()
+    ### Write CL options
+    with open(args.logfile, 'a') as f:
+        f.write("Command-line arguments: "+' '.join(i for i in sys.argv)+'\n')
     ### Prediction
     if args.method_options is not None:
         _update_options(args.method_options, logfile=args.logfile, \
@@ -109,9 +127,9 @@ if __name__ == '__main__':
                         segfile=args.segfile, outprefix=args.outprefix,\
                         times=args.times)
     if args.chunks is not None:
-        results = chunks(args.traj, args.parm, args.stride, args.chunks, args.method, args.method_options)
+        results = chunks(args.traj, args.parm, args.start, args.end, args.stride, args.select, args.chunks, args.method, args.method_options)
     else:
-        results = full(args.traj, args.parm, args.stride, args.method, args.method_options)
+        results = full(args.traj, args.parm, args.start, args.end, args.stride, args.select, args.method, args.method_options)
     ### Analysis
     if args.analysis_options is not None:
         _update_options(args.analysis_options, logfile=args.logfile, \

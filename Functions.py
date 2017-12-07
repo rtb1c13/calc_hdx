@@ -2,6 +2,9 @@
 
 # Transferable functions for HDX analysis
 
+from __future__ import print_function
+from __future__ import division
+#
 import mdtraj as md
 import numpy as np
 
@@ -11,10 +14,10 @@ class HDX_Error(Exception):
     """Exception in HDX module"""
 
 # Functions
-def load_fulltraj(traj, parm, **kwargs):
+def load_fulltraj(traj, parm, start=1, stop=None, stride=1, **kwargs):
     """Loads an MDtraj trajectory object with the desired topology
        and coordinates.
-       Usage: setup_universe(parm,traj,[**kwargs])
+       Usage: setup_universe(parm,traj,[start=1,stop=None,stride=1,**kwargs])
        Standard kwargs include atom_indices (an array of 0-indexed
        atoms to keep) and stride (integer of every nth frame to keep).
 
@@ -26,16 +29,18 @@ def load_fulltraj(traj, parm, **kwargs):
        Returns a complete trajectory, which may be memory intensive.
 
        See also load_trajchunks for an iterative load of large trajectories """
-    return md.load(traj, top=parm, **kwargs)
+    t = md.load(traj, top=parm, **kwargs)
+    if stop is None:
+        stop = t.n_frames
+    return t[start-1:stop:stride] # Start is zero indexed
 
-def load_trajchunks(traj, parm, **kwargs):
+def load_trajchunks(traj, parm, start=1, stride=1, **kwargs):
     """Loads a file into a generator of MDtraj trajectory chunks.
        Useful for large/memory intensive trajectory files
-       Usage: load_trajchunks(traj, parm, [**kwargs])
+       Usage: load_trajchunks(traj, parm, [start=1, stride=1, **kwargs])
        Standard kwargs include chunk (size of the trajectory chunks
-       to load per iteration), skip (n frames to skip at the start of
-       the trajectory), atom_indices (an array of 0-indexed
-       atoms to keep) and stride (integer of every nth frame to keep) 
+       to load per iteration), and atom_indices (an array of 0-indexed
+       atoms to keep).
        
        'standard_names=False' may also be useful for PDB topologies,
        otherwise amide H might be renamed from the atom names provided
@@ -43,7 +48,46 @@ def load_trajchunks(traj, parm, **kwargs):
        terminal NH3 group).
    
        Returns a generator object with trajectory iterations."""
-    return md.iterload(traj, top=parm, **kwargs)
+    return md.iterload(traj, top=parm, skip=start-1, stride=stride, **kwargs) # Start is zero indexed
+
+def itertraj_slice(gen, chunk, end, stride=1):
+    """Slices a generator (returned by load_trajchunks) of size chunk
+       to stop after a given number of frames. Ending frame should be
+       given with reference to the ORIGINAL trajectory, not the trajectory
+       resampled at interval traj[::stride]. This is consistent with the
+       'skip' kwarg for mdtraj.iterload
+        
+       Usage: slice_itertraj(gen, chunk, end, [stride=1])
+       Yields: Trajectories of size chunk until original trajectory file
+               is exhausted or frame end is reached."""
+    yielded_frames = 0                                          
+    end /= stride
+    end = int(end) # floor
+    while yielded_frames + chunk < end:
+        yielded_frames += chunk
+        x = gen.next()
+        yield x
+    x = gen.next()
+    yield x[:(end - yielded_frames)+1]
+    raise StopIteration
+
+def select(traj, selection):
+    """Strips a trajectory based on the MDTraj-format text selection
+       provided. By default this is "all"
+ 
+       Usage: select(traj, selection)
+       Returns: Trajectory with selected atoms"""
+    if selection == "all":
+        return traj
+#    try:
+    atms = traj.topology.select(selection)
+    new_t = traj.atom_slice(atms)
+    new_t.topology = traj.topology.subset(atms)
+    return new_t
+#    except (ValueError, AttributeError):
+#        raise HDX_Error("Your selection of trajectory atoms hasn't been parsed properly - check the syntax")
+#    except IndexError:
+#        raise HDX_Error("You're attempting to select trajectory atoms that don't exist - check the syntax")
 
 def list_prolines(traj, log="HDX_analysis.log"):
     """Creates a list of proline residues and appropriate resids.
