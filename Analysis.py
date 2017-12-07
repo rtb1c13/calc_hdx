@@ -136,9 +136,16 @@ class Analyze():
         self.MUE = np.zeros(len(self.params['times']))
         self.MSE = np.zeros(len(self.params['times']))
         for idx, t in enumerate(self.params['times']):
-            self.correls[idx] = correl(self.expfracs[:,idx], self.segfracs[:,idx])
-            self.MSE[idx] = np.mean(self.expfracs[:,idx] - self.segfracs[:,idx])
-            self.MUE[idx] = np.mean(np.abs(self.expfracs[:,idx] - self.segfracs[:,idx]))
+            self.correls[idx] = correl(self.segfracs[:,idx], self.expfracs[:,idx])[0]
+            self.MSE[idx] = np.mean(self.segfracs[:,idx] - self.expfracs[:,idx])
+            self.MUE[idx] = np.mean(np.abs(self.segfracs[:,idx] - self.expfracs[:,idx]))
+        with open(self.params['outprefix']+"Descriptive_statistics.dat", 'a') as f:
+            np.savetxt(f, self.correls, header="Pearson's R correlation, Times / min: %s" \
+                       % ' '.join([ str(t) for t in self.params['times'] ]), fmt='%8.6f')
+            np.savetxt(f, self.MSE, header="Mean signed error / frac, Pred. - Expt., Times / min: %s" \
+                       % ' '.join([ str(t) for t in self.params['times'] ]), fmt='%10.8f')
+            np.savetxt(f, self.MUE, header="Mean unsigned error / frac, Pred. - Expt., Times / min: %s" \
+                       % ' '.join([ str(t) for t in self.params['times'] ]), fmt='%10.8f')
             
     def run(self, figs=False):
         """Runs a by-segment HDX prediction and optionally graphs results"""
