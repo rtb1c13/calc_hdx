@@ -127,9 +127,13 @@ if __name__ == '__main__':
                         segfile=args.segfile, outprefix=args.outprefix,\
                         times=args.times)
     if args.chunks is not None:
-        results = chunks(args.traj, args.parm, args.start, args.end, args.stride, args.select, args.chunks, args.method, args.method_options)
+        results = chunks(args.traj, args.parm, args.start, args.end,\
+                         args.stride, args.select, args.chunks,\
+                         args.method, args.method_options)
     else:
-        results = full(args.traj, args.parm, args.start, args.end, args.stride, args.select, args.method, args.method_options)
+        results = full(args.traj, args.parm, args.start, args.end,\
+                       args.stride, args.select, args.method,\
+                       args.method_options)
     ### Analysis
     if args.analysis_options is not None:
         _update_options(args.analysis_options, logfile=args.logfile, \

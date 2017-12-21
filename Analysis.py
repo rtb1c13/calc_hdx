@@ -99,6 +99,19 @@ class Analyze():
         except TypeError:
             aves = np.zeros((len(self.segres), 1))
             self.params['times'] = [self.params['times']]    
+
+        # Info for 'skip_first'
+        if self.params['skip_first']:
+            for i1, s in enumerate(self.segres):
+                with open(self.params['logfile'], 'a') as f:
+                    f.write("'Skip_first' is set. Not including residue %s in averaging for segment %s-%s.\n" \
+                            % (top.residue(res2idx[s[0]]), s[0], s[1]))
+        else:
+            for i1, s in enumerate(self.segres):
+                with open(self.params['logfile'], 'a') as f:
+                    f.write("'Skip_first' is NOT set. Including residue %s in averaging for segment %s-%s.\n" \
+                            % (top.residue(res2idx[s[0]]), s[0], s[1]))
+
         for i2, t in enumerate(self.params['times']):
             for i1, s in enumerate(self.segres):
                 try:
@@ -116,7 +129,11 @@ class Analyze():
                                  % (s[0], top.residue(-1)))
                     end = top.residue(-1).index
 
-                idxs = np.where(np.logical_and( self.reslist > start, self.reslist <= end ))[0] # > s[0] skips the first residue in segment
+                if self.params['skip_first']:
+                    idxs = np.where(np.logical_and( self.reslist > start, self.reslist <= end ))[0] # > start skips
+                else:
+                    idxs = np.where(np.logical_and( self.reslist >= start, self.reslist <= end ))[0] # >= start incs
+                    
                 aves[i1, i2] = np.mean(self.resfracs[idxs, i2])
 
         np.savetxt(self.params['outprefix']+"Segment_average_fractions.dat", np.hstack((self.segres, aves)), \

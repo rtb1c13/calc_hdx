@@ -39,6 +39,7 @@ class Radou():
                         'kint_params' : None,
                         'times' : [ 0.167, 1.0, 10.0, 120.0],
                         'segfile' : "cropped_seg.list",
+                        'expfile' : None,
                         'logfile' : "HDX_analysis.log",
                         'outprefix' : '' }
         self.params.update(extra_params) # Update main parameter set from kwargs
@@ -465,22 +466,26 @@ class Radou():
 
      # Adjust residue names for: Cis-Pro, HIP, cystine bridges, GLH/ASH
         reslist = np.insert(self.reslist,0,self.reslist[0]-1) # Insert 'prev' residue for first index
+        oldnames = {}
         for i in reslist:
             curr = self.top.residue(i)
             try:
                 if np.max(curr.cis_byframe): # If cis-proline is true for any frame
+                    oldnames[i] = curr.name
                     curr.name = 'PROC'
                     continue
             except AttributeError:
                 pass
             try:
                 if np.max(curr.HIP): # If His+ is true for any frame
+                    oldnames[i] = curr.name
                     curr.name = 'HIP'
                     continue
             except AttributeError:
                 pass
             try:
                 if np.max(curr.disulf): # If Cys-Cys is true for any frame
+                    oldnames[i] = curr.name
                     curr.name = 'CYS2'
                     continue
             except AttributeError:
@@ -488,6 +493,7 @@ class Radou():
             if curr.name == 'GLU': # If Glu has a protonated carboxylate
                 try:
                     curr.atom('HE2')
+                    oldnames[i] = curr.name
                     curr.name = 'GLH'
                     continue
                 except KeyError:
@@ -495,25 +501,38 @@ class Radou():
             if curr.name == 'ASP': # If Asp has a protonated carboxylate
                 try:
                     curr.atom('HD2')
+                    oldnames[i] = curr.name
                     curr.name = 'ASH'
                     continue
                 except KeyError:
                     pass
-
-        # Assign N/C termini
-        for chain in self.top.chains:
-            chain.residue(0).name = 'NT'
-            # Doesn't appead to be a standard name for COOH hydrogen - guess based on no. of bonds!
+            # Assign N/C termini
             try:
-                if chain.residue(-1).atom('O').n_bonds > 1 or chain.residue(-1).atom('OXT').n_bonds > 1:
-                    chain.residue(-1).name = 'CTH'
-                    with open(self.params['logfile'], 'a') as f:
-                        f.write("It looks like you have a neutral C-terminus (COOH) at residue %s?\n" % chain.residue(-1))
-                else:
-                    chain.residue(-1).name = 'CT'
-            except KeyError:
-                with open(self.params['logfile'], 'a') as f:
-                    f.write("Residue %s at the end of a chain doesn't seem to have atoms named 'O'/'OXT'.\nI'm not treating it as a C-terminus.\n" % chain.residue(-1))
+                if np.max(curr.nterm): # If nterm is true for any frame
+                    oldnames[i] = curr.name
+                    curr.name = 'NT'
+                    continue
+            except AttributeError:
+                pass
+            try:
+                if np.max(curr.cterm): # If cterm is true for any frame
+                    oldnames[i] = curr.name
+                    try:
+                        if curr.atom('O').n_bonds > 1 or curr.atom('OXT').n_bonds > 1:
+                            curr.name = 'CTH'
+                            with open(self.params['logfile'], 'a') as f:
+                                f.write("It looks like you have a neutral C-terminus (COOH) at residue %s?\n" % curr)
+                        else:
+                            curr.name = 'CT'
+                        continue
+                    except KeyError:
+                        with open(self.params['logfile'], 'a') as f:
+                            f.write("Residue %s is defined as a C-terminus but has no atom O or OXT, is this correct?\n" % curr)
+                        curr.name = 'CT'
+                        continue
+            except AttributeError:
+                pass
+
 
         reslist = np.delete(reslist, 0) # Remove i-1 residue we inserted above
         try:
@@ -554,6 +573,9 @@ class Radou():
             np.savetxt(self.params['outprefix']+"Intrinsic_rates.dat", np.stack((rids, kints), axis=1), \
                        fmt=['%7d','%18.8f'], header="ResID  Intrinsic rate / min^-1 ") # Use residue indices internally, print out IDs
 
+        for residx, oldname in oldnames.iteritems():
+            self.top.residue(residx).name = oldname
+        self.oldnames = oldnames
         return kints
 
     # Deuterated fration by residue
