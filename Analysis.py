@@ -180,8 +180,9 @@ class Analyze():
                 np.savetxt(self.params['outprefix']+"SUMMARY_protection_factors.dat", np.stack((rids, self.pfs), axis=1), \
                            fmt=['%7d','%18.8f'], header="ResID  Protection factor") # Use residue indices internally, print out IDs
         except AttributeError:
-            print("Can't write summary protection factors - perhaps you haven't calculated them yet?")
-            return
+            raise Functions.HDXError("Can't write summary protection factors - perhaps you haven't calculated them yet?")
+
+        # Save residue deuterated fractions to 'SUMMARY' file
         try:
             if os.path.exists(self.params['outprefix']+"SUMMARY_residue_fractions.dat"):
                 filenum = len(glob.glob(self.params['outprefix']+"SUMMARY_residue_fractions*"))
@@ -197,8 +198,7 @@ class Analyze():
                            header="ResID  Deuterated fraction, Times / min: %s" \
                            % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
         except AttributeError:
-            print("Can't write summary residue fractions - perhaps you haven't calculated them yet?")
-            return
+            raise Functions.HDXError("Can't write summary residue fractions - perhaps you haven't calculated them yet?")
         
     
     def run(self, figs=False):
