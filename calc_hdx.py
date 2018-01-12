@@ -146,3 +146,5 @@ if __name__ == '__main__':
                         outprefix=args.outprefix, times=args.times)
     analysis = Analysis.Analyze(results, results.top, **args.analysis_options)
     analysis.run()
+    if args.chunks is not None:
+        analysis.print_summaries()

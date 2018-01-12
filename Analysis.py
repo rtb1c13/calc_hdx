@@ -5,6 +5,7 @@
 import Functions
 import numpy as np
 import matplotlib.pyplot as plt
+import os, glob
 from scipy.stats import pearsonr as correl
 
 class Analyze():
@@ -15,6 +16,7 @@ class Analyze():
         try:
             self.reslist = resobj.reslist
             self.resfracs = resobj.resfracs
+            self.pfs = resobj.pfs
             self.n_frames = resobj.t.n_frames
             self.top = top
         except AttributeError:
@@ -22,12 +24,9 @@ class Analyze():
         self.params = resobj.params
         try:
             self.params.update(extra_params)
-        except (TypeError,ValueError):
+        except (TypeError, ValueError):
             print("Couldn't load extra parameters for analysis (maybe they weren't provided?).\nUsing previous parameters from %s object." % resobj)
                    
- #TODO if extra_params is None, get params from resobj
-
-
 
     def read_segfile(self):
 
@@ -163,7 +162,45 @@ class Analyze():
                        % ' '.join([ str(t) for t in self.params['times'] ]), fmt='%10.8f')
             np.savetxt(f, self.MUE, header="Mean unsigned error / frac, Pred. - Expt., Times / min: %s" \
                        % ' '.join([ str(t) for t in self.params['times'] ]), fmt='%10.8f')
-            
+
+    def print_summaries(self):
+        """Print summary PF and resfrac results - for example of a method
+           object that has had results summed over multiple chunks."""
+
+        
+        # Save PFs to 'SUMMARY' file
+        try:
+            rids = np.asarray([ self.top.residue(i).resSeq for i in self.reslist ])
+            if os.path.exists(self.params['outprefix']+"SUMMARY_protection_factors.dat"):
+                filenum = len(glob.glob(self.params['outprefix']+"SUMMARY_protection_factors*"))
+                np.savetxt(self.params['outprefix']+"SUMMARY_protection_factors_%d.dat" % (filenum+1), \
+                           np.stack((rids, self.pfs), axis=1), fmt=['%7d','%18.8f'], \
+                           header="ResID  Protection factor") # Use residue indices internally, print out IDs
+            else:    
+                np.savetxt(self.params['outprefix']+"SUMMARY_protection_factors.dat", np.stack((rids, self.pfs), axis=1), \
+                           fmt=['%7d','%18.8f'], header="ResID  Protection factor") # Use residue indices internally, print out IDs
+        except AttributeError:
+            print("Can't write summary protection factors - perhaps you haven't calculated them yet?")
+            return
+        try:
+            if os.path.exists(self.params['outprefix']+"SUMMARY_residue_fractions.dat"):
+                filenum = len(glob.glob(self.params['outprefix']+"SUMMARY_residue_fractions*"))
+                np.savetxt(self.params['outprefix']+"SUMMARY_residue_fractions_%d.dat" % (filenum+1), \
+                           np.hstack((np.reshape(rids, (len(self.reslist),1)), self.resfracs)), \
+                           fmt='%7d ' + '%8.5f '*len(self.params['times']), \
+                           header="ResID  Deuterated fraction, Times / min: %s" \
+                           % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
+            else:    
+                np.savetxt(self.params['outprefix']+"SUMMARY_residue_fractions.dat", \
+                           np.hstack((np.reshape(rids, (len(self.reslist),1)), self.resfracs)), \
+                           fmt='%7d ' + '%8.5f '*len(self.params['times']), \
+                           header="ResID  Deuterated fraction, Times / min: %s" \
+                           % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
+        except AttributeError:
+            print("Can't write summary residue fractions - perhaps you haven't calculated them yet?")
+            return
+        
+    
     def run(self, figs=False):
         """Runs a by-segment HDX prediction and optionally graphs results"""
 
