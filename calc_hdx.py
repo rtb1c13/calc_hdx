@@ -64,49 +64,74 @@ def _update_options(opts, **updates):
     """Updates options dictionary with extra kwargs"""
     opts.update(updates)
 
-def predict(traj, method, opts):
+def predict(traj, method, mopts, aopts):
     """Predicts fraction of deuterium exchange for residues in the given
-       trajectory, using the given method and dictionary of options.
+       trajectory, using the given method and dictionary of options, and
+       creates a suitable Analysis.Analyze object to store these results.
  
-       Usage: predict(traj, method, options)
-       Returns: Object of desired method class, with completed HDX predictions"""
+       Usage: predict(traj, method, method_options, analysis_options)
+       Returns: (Object of desired method class with completed HDX predictions,
+                 Analyze object with completed HDX results)"""
 
+    m_obj = _get_method(method)(**mopts)
+    m_obj.run(traj)
+    a_obj = Analysis.Analyze(m_obj, m_obj.top, **aopts)
+    return m_obj, a_obj
 
-    result = _get_method(method)(**opts)
-    result.run(traj)
-    return result
+def combine_results(first, second):
+    """Sum objects in given tuples using the __add__ method of
+       each object. e.g.
+       
+       foo[0] = foo[0] + bar[0]
+       foo[1] = foo[1] + bar[1]
+       return foo
 
-def full(trajlist, parm, start, stop, stride, select, method, opts):
+       Used here to sum Method and Analyze objects together for trajectories
+       read in chunks.
+
+       Usage: combine_results( (Method1, Analysis1), (Method2, Analysis2) )
+       Returns: (summed_methods, summed_analyses)"""
+
+    comb = [ a + b for a, b in zip(first, second) ]
+    return tuple(comb)
+
+def full(trajlist, parm, start, stop, stride, select, method, mopts, aopts):
     """Loads all trajectories in the given list and performs HDX predictions.
        'slicelist' is a list of indices for slicing the trajectory
 
-       Usage: full(trajlist, parm, slicelist, method, options)
-       Returns: Object of desired method class, with completed HDX predictions"""
+       Usage: full(trajlist, parm, slicelist, method, method_options, analysis_options)
+       Returns: (Object of desired method class with completed HDX predictions,
+                 Analyze object with completed HDX results)"""
 
     t = Functions.load_fulltraj(trajlist, parm=parm, start=start, stop=stop, stride=stride)
     tslice = Functions.select(t, select)
-    return predict(tslice, method, opts)   
+    summed_results, summed_analysis = predict(tslice, method, mopts, aopts)
+    return summed_results, summed_analysis
 
-def chunks(trajlist, parm, start, stop, stride, select, chunksize, method, opts):
-    """Loads trajectories in the given list in chunks and performs HDX predictions.
+def chunks(trajlist, parm, start, stop, stride, select, chunksize, method, mopts, aopts):
+    """Load trajectories in the given list in chunks and perform HDX predictions.
 
-       Usage: chunks(trajlist, parm, stride, chunksize, method, options)
-       Returns: Object of desired method class, with completed HDX predictions summed over all frames"""
+       Usage: chunks(trajlist, parm, stride, chunksize, method, method_options, analysis_options)
+       Returns: (Object of desired method class with completed HDX predictions summed over all frames,
+                 Analyze object with completed HDX results by chunk and cumulatively)"""
 
-    resultlist = []
+    fulllist = []
     for t in trajlist:
         if stop is None:
             stop = sum(t.n_frames*stride for t in Functions.load_trajchunks(t, parm=parm, stride=stride, chunk=chunksize))
         t_gen = Functions.load_trajchunks(t, parm=parm, start=start, stride=stride, chunk=chunksize)
+        print(start, stop)
         f_to_yield = stop - (start - 1)
-        # Sums generator with __iadd__ of desired method
-        resultlist.append(reduce(_get_method(method).__iadd__, \
-                                 (predict(Functions.select(t_chunk, select), method, opts) for t_chunk in \
-                                 Functions.itertraj_slice(t_gen, chunksize, f_to_yield, stride=stride))))
-    summed = resultlist.pop(0)
-    for r in resultlist:
-        summed += r
-    return summed
+        # Sums generator with __add__ of desired method
+        fulllist.append(reduce(combine_results, \
+                               (predict(Functions.select(t_chunk, select), method, mopts, aopts) for t_chunk in \
+                               Functions.itertraj_slice(t_gen, chunksize, f_to_yield, stride=stride))))
+    
+    resultlist = [ tup[0] for tup in fulllist ]
+    analysislist = [ tup[1] for tup in fulllist ]
+    firstresult = resultlist.pop(0)
+    firstanalysis = analysislist.pop(0)
+    return sum(resultlist, firstresult), sum(analysislist, firstanalysis)
 
 
 ### Main below here
@@ -116,7 +141,7 @@ if __name__ == '__main__':
     ### Write CL options
     with open(args.logfile, 'a') as f:
         f.write("Command-line arguments: "+' '.join(i for i in sys.argv)+'\n')
-    ### Prediction
+    ### Set up options
     if args.method_options is not None:
         _update_options(args.method_options, logfile=args.logfile, \
                         segfile=args.segfile, outprefix=args.outprefix,\
@@ -126,15 +151,6 @@ if __name__ == '__main__':
         _update_options(args.method_options, logfile=args.logfile, \
                         segfile=args.segfile, outprefix=args.outprefix,\
                         times=args.times)
-    if args.chunks is not None:
-        results = chunks(args.traj, args.parm, args.start, args.end,\
-                         args.stride, args.select, args.chunks,\
-                         args.method, args.method_options)
-    else:
-        results = full(args.traj, args.parm, args.start, args.end,\
-                       args.stride, args.select, args.method,\
-                       args.method_options)
-    ### Analysis
     if args.analysis_options is not None:
         _update_options(args.analysis_options, logfile=args.logfile, \
                         segfile=args.segfile, expfile=args.expfile, \
@@ -144,7 +160,15 @@ if __name__ == '__main__':
         _update_options(args.analysis_options, logfile=args.logfile, \
                         segfile=args.segfile, expfile=args.expfile,
                         outprefix=args.outprefix, times=args.times)
-    analysis = Analysis.Analyze(results, results.top, **args.analysis_options)
+    # Prediction & creation of analysis objects
+    if args.chunks is not None:
+        results, analysis = chunks(args.traj, args.parm, args.start, args.end,\
+                         args.stride, args.select, args.chunks,\
+                         args.method, args.method_options, args.analysis_options)
+    else:
+        results, analysis = full(args.traj, args.parm, args.start, args.end,\
+                       args.stride, args.select, args.method,\
+                       args.method_options, args.analysis_options)
     analysis.run()
     if args.chunks is not None:
         analysis.print_summaries()

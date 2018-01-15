@@ -68,7 +68,7 @@ def itertraj_slice(gen, chunk, end, stride=1):
         x = gen.next()
         yield x
     x = gen.next()
-    yield x[:(end - yielded_frames)+1]
+    yield x[:(end - yielded_frames)]
     raise StopIteration
 
 def select(traj, selection):

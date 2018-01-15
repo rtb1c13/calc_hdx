@@ -117,7 +117,7 @@ class Radou():
         """Print the method name"""
         return 'Radou'
 
-    def __iadd__(self, other):
+    def __add__(self, other):
         """Sum results in other method object to this one, weighted by number of frames in each"""
         if isinstance(other, Radou):
             try:

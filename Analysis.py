@@ -5,7 +5,7 @@
 import Functions
 import numpy as np
 import matplotlib.pyplot as plt
-import os, glob
+import os, glob, copy
 from scipy.stats import pearsonr as correl
 
 class Analyze():
@@ -15,9 +15,15 @@ class Analyze():
         """Initialises Analyze object from a Method object with by-residue results"""
         try:
             self.reslist = resobj.reslist
-            self.resfracs = resobj.resfracs
-            self.pfs = resobj.pfs
-            self.n_frames = resobj.t.n_frames
+            # Cumulative resfracs = 3D-array[chunk, resfrac, time]
+            self.resfracs = np.reshape(resobj.resfracs, (1, len(resobj.resfracs), len(resobj.resfracs[0])))
+            self.c_resfracs = np.copy(self.resfracs)
+            # Cumulative PFs = 2D-array[chunk, PFs]
+            self.pfs = np.reshape(resobj.pfs, (1, len(resobj.pfs)))
+            self.c_pfs = np.copy(self.pfs)
+            # Cumulative n_frames = 1D-array[n_frames]
+            self.n_frames = np.asarray(resobj.t.n_frames)
+            self.c_n_frames = np.copy(self.n_frames)
             self.top = top
         except AttributeError:
             raise Functions.HDX_Error("Error when copying results from prediction to analysis objects - have you made any HDX predictions yet?")
@@ -27,6 +33,44 @@ class Analyze():
         except (TypeError, ValueError):
             print("Couldn't load extra parameters for analysis (maybe they weren't provided?).\nUsing previous parameters from %s object." % resobj)
                    
+    def __add__(self, other):
+        """Add resfracs, pfs and n_frames from a second results object and
+           update cumulative sums.
+
+           Usage: __add__(self, other)"""
+
+        if isinstance(other, Analyze):
+            try:
+                new = copy.deepcopy(self)
+                # Append n_frames
+                new.n_frames = np.append(new.n_frames, other.n_frames)
+                new.c_n_frames = np.cumsum(new.n_frames)
+                
+                # Calc running ave of PFs = 2D-array[chunk, PFs]
+                new.pfs = np.concatenate((new.pfs, other.pfs), axis=0)
+                _ = np.copy(new.pfs)
+                for frames, curr_pf in zip(new.n_frames, _):
+                    curr_pf *= frames
+                new.c_pfs = np.cumsum(_, axis=0)
+                for tot_frames, tot_pf in zip(new.c_n_frames, new.c_pfs):
+                    tot_pf /= tot_frames
+            
+                # Calc running ave of resfracs = 3D-array[chunk, resfrac, time]
+                new.resfracs = np.concatenate((new.resfracs, other.resfracs), axis=0)
+                _ = np.copy(new.resfracs)
+                for frames, curr_rfrac in zip(new.n_frames, _):
+                    curr_rfrac *= frames
+                new.c_resfracs = np.cumsum(_, axis=0)
+                for tot_frames, tot_rfrac in zip(new.c_n_frames, new.c_resfracs):
+                    tot_rfrac /= tot_frames
+
+                return new
+ 
+            #except AttributeError:
+            except AttributeError:
+                raise Functions.HDX_Error("Error when adding analysis objects - have you made any HDX predictions yet?")
+        else:
+            return self
 
     def read_segfile(self):
 
@@ -94,9 +138,9 @@ class Analyze():
         
         self.read_segfile()
         try:
-            aves = np.zeros((len(self.segres), len(self.params['times'])))
+            aves = np.zeros((len(self.resfracs), len(self.segres), len(self.params['times'])))
         except TypeError:
-            aves = np.zeros((len(self.segres), 1))
+            aves = np.zeros((len(self.resfracs), len(self.segres), 1))
             self.params['times'] = [self.params['times']]    
 
         # Info for 'skip_first'
@@ -111,33 +155,45 @@ class Analyze():
                     f.write("'Skip_first' is NOT set. Including residue %s in averaging for segment %s-%s.\n" \
                             % (top.residue(res2idx[s[0]]), s[0], s[1]))
 
-        for i2, t in enumerate(self.params['times']):
-            for i1, s in enumerate(self.segres):
-                try:
-                    start = res2idx[s[0]]
-                except KeyError:
-                    with open(self.params['logfile'], 'a') as f:
-                        f.write("Didn't find residue %s in protein. Using residue %s as startpoint instead.\n" \
-                             % (s[0], top.residue(0)))
-                    start = 0
-                try:
-                    end = res2idx[s[1]]
-                except KeyError:
-                    with open(self.params['logfile'], 'a') as f:
-                        f.write("Didn't find residue %s in protein. Using residue %s as endpoint instead.\n" \
-                                 % (s[0], top.residue(-1)))
-                    end = top.residue(-1).index
+        # Write average fractions file for each chunk                    
+        for i0, chunk in enumerate(self.resfracs):
+            for i2, t in enumerate(self.params['times']):
+                for i1, s in enumerate(self.segres):
+                    try:
+                        start = res2idx[s[0]]
+                    except KeyError:
+                        with open(self.params['logfile'], 'a') as f:
+                            f.write("Didn't find residue %s in protein. Using residue %s as startpoint instead.\n" \
+                                 % (s[0], top.residue(0)))
+                        start = 0
+                    try:
+                        end = res2idx[s[1]]
+                    except KeyError:
+                        with open(self.params['logfile'], 'a') as f:
+                            f.write("Didn't find residue %s in protein. Using residue %s as endpoint instead.\n" \
+                                     % (s[0], top.residue(-1)))
+                        end = top.residue(-1).index
+    
+                    if self.params['skip_first']:
+                        idxs = np.where(np.logical_and( self.reslist > start, self.reslist <= end ))[0] # > start skips
+                    else:
+                        idxs = np.where(np.logical_and( self.reslist >= start, self.reslist <= end ))[0] # >= start incs
 
-                if self.params['skip_first']:
-                    idxs = np.where(np.logical_and( self.reslist > start, self.reslist <= end ))[0] # > start skips
-                else:
-                    idxs = np.where(np.logical_and( self.reslist >= start, self.reslist <= end ))[0] # >= start incs
+                    aves[i0, i1, i2] = np.mean(chunk[idxs, i2])
                     
-                aves[i1, i2] = np.mean(self.resfracs[idxs, i2])
+        # Write average fractions file for each chunk                    
+        for chunkave in aves:
+            if os.path.exists(self.params['outprefix']+"Segment_average_fractions.dat"):
+                filenum = len(glob.glob(self.params['outprefix']+"Segment_average_fractions*"))
+                np.savetxt(self.params['outprefix']+"Segment_average_fractions_chunk_%d.dat" % (filenum+1), \
+                           np.hstack((self.segres, chunkave)), \
+                           fmt='%6d %6d ' + '%8.5f '*len(self.params['times']), header="Res 1   Res2  Times / min: %s" \
+                           % ' '.join([ str(t) for t in self.params['times'] ]))
+            else:
+                np.savetxt(self.params['outprefix']+"Segment_average_fractions.dat", np.hstack((self.segres, chunkave)), \
+                           fmt='%6d %6d ' + '%8.5f '*len(self.params['times']), header="Res 1   Res2  Times / min: %s" \
+                           % ' '.join([ str(t) for t in self.params['times'] ]))
 
-        np.savetxt(self.params['outprefix']+"Segment_average_fractions.dat", np.hstack((self.segres, aves)), \
-                   fmt='%6d %6d ' + '%8.5f '*len(self.params['times']), header="Res 1   Res2  Times / min: %s" \
-                   % ' '.join([ str(t) for t in self.params['times'] ]))
         with open(self.params['logfile'], 'a') as f:
             f.write("Segment averaging complete.\n")
 
@@ -174,31 +230,49 @@ class Analyze():
             if os.path.exists(self.params['outprefix']+"SUMMARY_protection_factors.dat"):
                 filenum = len(glob.glob(self.params['outprefix']+"SUMMARY_protection_factors*"))
                 np.savetxt(self.params['outprefix']+"SUMMARY_protection_factors_%d.dat" % (filenum+1), \
-                           np.stack((rids, self.pfs), axis=1), fmt=['%7d','%18.8f'], \
+                           np.stack((rids, self.c_pfs[-1]), axis=1), fmt=['%7d','%18.8f'], \
                            header="ResID  Protection factor") # Use residue indices internally, print out IDs
             else:    
-                np.savetxt(self.params['outprefix']+"SUMMARY_protection_factors.dat", np.stack((rids, self.pfs), axis=1), \
+                np.savetxt(self.params['outprefix']+"SUMMARY_protection_factors.dat", np.stack((rids, self.c_pfs[-1]), axis=1), \
                            fmt=['%7d','%18.8f'], header="ResID  Protection factor") # Use residue indices internally, print out IDs
         except AttributeError:
-            raise Functions.HDXError("Can't write summary protection factors - perhaps you haven't calculated them yet?")
+            raise Functions.HDX_Error("Can't write summary protection factors - perhaps you haven't calculated them yet?")
 
         # Save residue deuterated fractions to 'SUMMARY' file
         try:
             if os.path.exists(self.params['outprefix']+"SUMMARY_residue_fractions.dat"):
                 filenum = len(glob.glob(self.params['outprefix']+"SUMMARY_residue_fractions*"))
                 np.savetxt(self.params['outprefix']+"SUMMARY_residue_fractions_%d.dat" % (filenum+1), \
-                           np.hstack((np.reshape(rids, (len(self.reslist),1)), self.resfracs)), \
+                           np.concatenate((np.reshape(rids, (len(self.reslist),1)), self.c_resfracs[-1]), axis=1), \
                            fmt='%7d ' + '%8.5f '*len(self.params['times']), \
                            header="ResID  Deuterated fraction, Times / min: %s" \
                            % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
             else:    
                 np.savetxt(self.params['outprefix']+"SUMMARY_residue_fractions.dat", \
-                           np.hstack((np.reshape(rids, (len(self.reslist),1)), self.resfracs)), \
+                           np.concatenate((np.reshape(rids, (len(self.reslist),1)), self.c_resfracs[-1]), axis=1), \
                            fmt='%7d ' + '%8.5f '*len(self.params['times']), \
                            header="ResID  Deuterated fraction, Times / min: %s" \
                            % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
         except AttributeError:
-            raise Functions.HDXError("Can't write summary residue fractions - perhaps you haven't calculated them yet?")
+            raise Functions.HDX_Error("Can't write summary residue fractions - perhaps you haven't calculated them yet?")
+
+
+        # Save segment deuterated averages to 'SUMMARY' file
+        try:
+            if os.path.exists(self.params['outprefix']+"SUMMARY_segment_average_fractions.dat"):
+                filenum = len(glob.glob(self.params['outprefix']+"SUMMARY_segment_average_fractions*"))
+                np.savetxt(self.params['outprefix']+"SUMMARY_segment_average_fractions_%d.dat" % (filenum+1), \
+                           np.hstack((self.segres, self.c_segfracs[-1])), \
+                           fmt='%6d %6d ' + '%8.5f '*len(self.params['times']), header="Res 1   Res2  Times / min: %s" \
+                           % ' '.join([ str(t) for t in self.params['times'] ]))
+            else:
+                np.savetxt(self.params['outprefix']+"SUMMARY_segment_average_fractions.dat", \
+                           np.hstack((self.segres, self.c_segfracs[-1])), \
+                           fmt='%6d %6d ' + '%8.5f '*len(self.params['times']), header="Res 1   Res2  Times / min: %s" \
+                           % ' '.join([ str(t) for t in self.params['times'] ]))
+
+        except AttributeError:
+            raise Functions.HDX_Error("Can't write summary segment fractions - perhaps you haven't calculated them yet?")
         
     
     def run(self, figs=False):
@@ -206,6 +280,13 @@ class Analyze():
 
         self.read_segfile()
         self.segfracs = self.segments(self.top)
+        # Create running average of segment fractions
+        _ = np.copy(self.segfracs)
+        for frames, curr_segfrac in zip(self.n_frames, _):
+            curr_segfrac *= frames
+        self.c_segfracs = np.cumsum(_, axis=0)
+        for tot_frames, tot_segfrac in zip(self.c_n_frames, self.c_segfracs):
+            tot_segfrac /= tot_frames
         if self.params['expfile'] is not None:
             self.read_expfile()
             self.desc_stats()
