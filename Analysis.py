@@ -5,11 +5,11 @@
 import Functions
 import numpy as np
 import matplotlib.pyplot as plt
-import os, glob, copy
+import os, glob, copy, itertools
 from scipy.stats import pearsonr as correl
 
 class Analyze():
-    """Class to contain analysis & plotting methods for HDX predictions"""
+    """Class to contain results and analysis methods for HDX predictions"""
 
     def __init__(self, resobj, top, **extra_params):
         """Initialises Analyze object from a Method object with by-residue results"""
@@ -24,6 +24,8 @@ class Analyze():
             # Cumulative n_frames = 1D-array[n_frames]
             self.n_frames = np.atleast_1d(resobj.t.n_frames)
             self.c_n_frames = np.copy(self.n_frames)
+            # Topology & rates
+            self.rates = resobj.rates
             self.top = top
         except AttributeError:
             raise Functions.HDX_Error("Error when copying results from prediction to analysis objects - have you made any HDX predictions yet?")
@@ -40,7 +42,10 @@ class Analyze():
            Usage: __add__(self, other)"""
 
         if isinstance(other, Analyze):
-            try:
+#            try:
+                if not all((np.array_equal(self.reslist, other.reslist), np.array_equal(self.rates, other.rates))):
+                    print("Reslist or rates of added Analyze objects differ. Not adding them!")
+                    return self
                 new = copy.deepcopy(self)
                 # Append n_frames
                 new.n_frames = np.append(new.n_frames, other.n_frames)
@@ -57,25 +62,35 @@ class Analyze():
             
                 # Calc running ave of resfracs = 3D-array[chunk, resfrac, time]
                 new.resfracs = np.concatenate((new.resfracs, other.resfracs), axis=0)
-                _ = np.copy(new.resfracs)
-                for frames, curr_rfrac in zip(new.n_frames, _):
-                    curr_rfrac *= frames
-                new.c_resfracs = np.cumsum(_, axis=0)
-                for tot_frames, tot_rfrac in zip(new.c_n_frames, new.c_resfracs):
-                    tot_rfrac /= tot_frames
+                _ = np.zeros(new.resfracs[0].shape)
+                # Redo resfrac calculation based on running average of pfs
+                # N.B. Due to the exponential this is NOT just an average of the resfrac blocks
+                for i2, t in enumerate(new.params['times']):
+                    def _residue_fraction(pf, k, time=t):
+                        return 1 - np.exp(-k / pf * time)
+                    for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, new.c_pfs[-1], new.rates)):
+                        _[i1,i2] = curr_frac
+                new.c_resfracs = np.concatenate((new.c_resfracs, \
+                                                 np.reshape(_, (1, len(new.reslist), len(new.params['times'])))), \
+                                                 axis=0)
 
                 return new
  
-            #except AttributeError:
-            except AttributeError:
-                raise Functions.HDX_Error("Error when adding analysis objects - have you made any HDX predictions yet?")
+#            except AttributeError:
+#                raise Functions.HDX_Error("Error when adding analysis objects - have you made any HDX predictions yet?")
         else:
             return self
 
     def read_segfile(self):
 
         # segfile should contain at most 2 columns, startres & endres
-        self.segres = np.loadtxt(self.params['segfile'], dtype='i8')  # ResIDs will be converted to indices with dictionary in segments function
+        try:
+            self.segres = np.loadtxt(self.params['segfile'], dtype='i8')  # ResIDs will be converted to indices with dictionary in segments function
+            for v1, v2 in self.segres:
+                pass
+        except ValueError:
+            raise Functions.HDX_Error("There's a problem reading the values in your segments file: %s \n"
+                                      "File should contain 2 columns of integers, separated by spaces.")
 
     def read_expfile(self):
         """Reads an experimental data file for comparison to predicted data.
@@ -139,8 +154,10 @@ class Analyze():
         self.read_segfile()
         try:
             aves = np.zeros((len(self.resfracs), len(self.segres), len(self.params['times'])))
+            c_aves = np.zeros((len(self.c_resfracs), len(self.segres), len(self.params['times'])))
         except TypeError:
             aves = np.zeros((len(self.resfracs), len(self.segres), 1))
+            c_aves = np.zeros((len(self.c_resfracs), len(self.segres), 1))
             self.params['times'] = [self.params['times']]    
 
         # Info for 'skip_first'
@@ -155,7 +172,7 @@ class Analyze():
                     f.write("'Skip_first' is NOT set. Including residue %s in averaging for segment %s-%s.\n" \
                             % (top.residue(res2idx[s[0]]), s[0], s[1]))
 
-        # Write average fractions file for each chunk                    
+        # Calc average fractions for each chunk                    
         for i0, chunk in enumerate(self.resfracs):
             for i2, t in enumerate(self.params['times']):
                 for i1, s in enumerate(self.segres):
@@ -180,8 +197,39 @@ class Analyze():
                         idxs = np.where(np.logical_and( self.reslist >= start, self.reslist <= end ))[0] # >= start incs
 
                     aves[i0, i1, i2] = np.mean(chunk[idxs, i2])
+
+        # Do the same for cumulative resfracs
+        for i0, cchunk in enumerate(self.c_resfracs):
+            for i2, t in enumerate(self.params['times']):
+                for i1, s in enumerate(self.segres):
+                    try:
+                        start = res2idx[s[0]]
+                    except KeyError:
+                        with open(self.params['logfile'], 'a') as f:
+                            f.write("Cumulative segment averages: "
+                                    "Didn't find residue %s in protein. Using residue %s as startpoint instead.\n" \
+                                    % (s[0], top.residue(0)))
+                        start = 0
+                    try:
+                        end = res2idx[s[1]]
+                    except KeyError:
+                        with open(self.params['logfile'], 'a') as f:
+                            f.write("Cumulative segment averages: "
+                                    "Didn't find residue %s in protein. Using residue %s as endpoint instead.\n" \
+                                    % (s[0], top.residue(-1)))
+                        end = top.residue(-1).index
+    
+                    if self.params['skip_first']:
+                        idxs = np.where(np.logical_and( self.reslist > start, self.reslist <= end ))[0] # > start skips
+                    else:
+                        idxs = np.where(np.logical_and( self.reslist >= start, self.reslist <= end ))[0] # >= start incs
+
+                    c_aves[i0, i1, i2] = np.mean(cchunk[idxs, i2])
                     
-        # Write average fractions file for each chunk                    
+        # Write average fractions file for each chunk
+        # N.B Again, these will NOT add up to the c_segfracs value, which is recalc'd using
+        # the exponential decay and the mean PF at a given timepoint (not just a straight ave
+        # of the block averaged resfracs)
         for chunkave in aves:
             if os.path.exists(self.params['outprefix']+"Segment_average_fractions.dat"):
                 filenum = len(glob.glob(self.params['outprefix']+"Segment_average_fractions*"))
@@ -197,7 +245,7 @@ class Analyze():
         with open(self.params['logfile'], 'a') as f:
             f.write("Segment averaging complete.\n")
 
-        return aves
+        return aves, c_aves
 
 
     def desc_stats(self):
@@ -279,26 +327,126 @@ class Analyze():
         """Runs a by-segment HDX prediction and optionally graphs results"""
 
         self.read_segfile()
-        self.segfracs = self.segments(self.top)
-        # Create running average of segment fractions
-        _ = np.copy(self.segfracs)
-        for frames, curr_segfrac in zip(self.n_frames, _):
-            curr_segfrac *= frames
-        self.c_segfracs = np.cumsum(_, axis=0)
-        for tot_frames, tot_segfrac in zip(self.c_n_frames, self.c_segfracs):
-            tot_segfrac /= tot_frames
+        self.segfracs, self.c_segfracs = self.segments(self.top)
         if self.params['expfile'] is not None:
             self.read_expfile()
             self.desc_stats()
-            
+
+### Plotting Class
+class Plots():
+    """Class to plot results of HDX predictions"""
+
+    def __init__(self, aobj):
+        """Initialise a Plots object from an Analyze object"""
+        if isinstance(aobj, Analyze):
+            self.results = aobj
+        else:
+            raise Functions.HDX_Error("Can't initialize a Plots object from anything"\
+                                      "other than a completed Analyze object.")
+
+    def choose_plots(self, **override_opts):
+        """Choose available plots based on results in Analyze object.
+           Normally these will be automatically chosen based on available
+           data, but switch can be overriden by providing kwargs.
+
+           Available plots:
+           df_curve : By-segment deuterated fractions for all timepoints
+           df_convergence : Convergence of by-segment deuterated fractions across all simulation chunks
+           seg_curve : By-segment predictions across all timepoints
+           seg_convergence : Convergence of by-segment predictions across all timepoints
+           pf_curve : By-residue protection factors
+           tot_pf   : Convergence of total protection factor across all simulation chunks
+           _expt_overlay : Option to switch on/off overlay of experimental values on all relevant plots
+           _block_ave : Option to switch on/off block averaging plots as well as convergence (running ave)
+
+           Sets Plots.avail attribute with dictionary of results."""
+
+        self.avail = { 'df_curve' : False,
+                       'df_convergence' : False,
+                       'seg_curve' : False,
+                       'seg_convergence' : False,
+                       'pf_curve' : False,
+                       'tot_pf' : False,
+                       '_expt_overlay' : False,
+                       '_block_ave' : False }
+
+        try:
+            self.results.c_resfracs[-1]
+            self.avail['df_curve'] = True
+            if len(self.results.c_resfracs) > 1:
+                self.avail['df_convergence'] = True
+        except (AttributeError, IndexError):
+            pass
+        try:
+            self.results.c_segfracs[-1]
+            self.avail['seg_curve'] = True
+            if len(self.results.c_segfracs) > 1:
+                self.avail['seg_convergence'] = True
+        except (AttributeError, IndexError):
+            pass
+        try:
+            self.avail['pf_curve'] = ( len(self.results.c_pfs[-1]) == len(self.results.reslist) )
+            if len(self.results.c_pfs) > 1:
+                self.avail['tot_pf'] = True
+        except (AttributeError, IndexError):
+            pass
+        try:
+            if len(self.results.c_pfs) > 1:
+                self.avail['tot_pf'] = True
+        except AttributeError:
+            pass
+        try:
+            # Other data soundness checks (for times, segres) are in Analyze.read_expfile
+            self.avail['_expt_overlay'] = ( len(self.results.c_segfracs[-1]) == len(self.results.expfracs) )
+        except (AttributeError, IndexError):
+            pass
+
+        # Overrides
+        try:
+            self.avail.update(override_opts)
+            print("Available plots manually overriden for plots: %s" % ", ".join(override_opts.keys()))
+        except (TypeError, ValueError):
+            print("Available plots automatically chosen without overrides")
+        
+    def df_curve(self):
+        """Plot a predicted deuteration curve for each segment. Plots are optionally
+           overlaid with experimental curves, according to the value of
+           Plots.avail['_expt_overlay']""" 
+
+        def _plot_df_curve(ax, segdata, overlay_ys=None, **plot_opts):
+            xs, ys = self.results.params['times'], segdata[2:]
+            ax.plot(xs, ys, color='black', linewidth=2, linestyle='-', label="Predicted", **plot_opts)
+            ax.set_title("Segment %d-%d" % (segdata[0], segdata[1]), fontsize=9)
+            ax.set_xlim(0.0, xs[-1])
+            ax.set_ylim(0.0, 1.0)
+            ax.set_xbound(upper=xs[-1])
+
+            if overlay_ys is not None:
+                ax.plot(xs, overlay_ys, color='blue', linewidth=2, linestyle='--', label="Experimental")
+            ax.legend(fontsize=6)
+
+        nrows = int(len(self.results.c_segfracs[-1]) / 2) + 1 # Ceiling
+        fig, axs = plt.subplots(ncols=2, nrows=nrows, sharex=True, \
+                                sharey=True, figsize=(8.4, 2.2*nrows)) 
+        fig.suptitle("Deuterated fractions against time", fontsize=14)
+        for ax in axs[:,0]:
+            ax.set_ylabel("Deuterated fraction")
+        for ax in axs[-1,:]:
+            ax.set_xlabel("Time / min")
+        axs = axs.flatten()
+        if self.avail['_expt_overlay']:
+            for a, predsegs, expt in zip(axs, \
+                                         np.hstack((self.results.segres, self.results.c_segfracs[-1])), \
+                                         self.results.expfracs):
+                _plot_df_curve(a, predsegs, overlay_ys=expt)
+        else:
+            for a, predsegs in zip(axs, np.hstack((self.results.segres, self.results.c_segfracs[-1]))):
+                _plot_df_curve(a, predsegs)
+        fig.tight_layout()
+        fig.subplots_adjust(top=0.95)
+        fig.savefig("Test_df_curve.png", dpi=300)
+
+
 
 
 ### Add further classes below here
-
-
-
-
-
-
-
-

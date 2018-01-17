@@ -28,7 +28,7 @@ def parse():
     parser.add_argument("-c","--chunks",help="If set, trajectory will be read in chunks of this size (lowers memory requirements for large trajectories). Default = 1000", nargs='?', type=int, const=1000)
     parser.add_argument("-sel","--select",help="MDTraj format selection string for atoms to select for analysis from trajectories. Default = 'all'", default='all')
     parser.add_argument("-m","--method",help="Method for analysis. Currently 'Radou' is the only option", choices=['Radou'], default='Radou', required=True)
-    parser.add_argument("-dt","--times",help="Times for analysis, in minutes. Defaults to [ 0.167, 1.0, 10.0, 120.0 ]", nargs='+', default=[0.167, 1.0, 10.0, 120.0])
+    parser.add_argument("-dt","--times",help="Times for analysis, in minutes. Defaults to [ 0.167, 1.0, 10.0, 120.0 ]", nargs='+', default=[0.167, 1.0, 10.0, 120.0], type=float)
     parser.add_argument("-log","--logfile",help="Name of logfile for printout of run info. Defaults to 'HDX_analysis.log'", type=str, default='HDX_analysis.log')
     parser.add_argument("-seg","--segfile",help="Name of file with segment definitions for analysis. Segments should be defined one per line, with starting/finishing residues whitespace separated. Defaults to 'cropped_seg.list'",type=str, default='cropped_seg.list')
     parser.add_argument("-exp","--expfile",help="Name of file with experimental deuterated fractions. Segments should be identical to those in segfile, defined one per line, followed by one column for each timepoint in --times. Whitespace separated. No default.")
