@@ -120,7 +120,6 @@ def chunks(trajlist, parm, start, stop, stride, select, chunksize, method, mopts
         if stop is None:
             stop = sum(t.n_frames*stride for t in Functions.load_trajchunks(t, parm=parm, stride=stride, chunk=chunksize))
         t_gen = Functions.load_trajchunks(t, parm=parm, start=start, stride=stride, chunk=chunksize)
-        print(start, stop)
         f_to_yield = stop - (start - 1)
         # Sums generator with __add__ of desired method
         fulllist.append(reduce(combine_results, \

@@ -22,7 +22,7 @@ class Analyze():
             self.pfs = np.reshape(resobj.pfs, (1, len(resobj.pfs)))
             self.c_pfs = np.copy(self.pfs)
             # Cumulative n_frames = 1D-array[n_frames]
-            self.n_frames = np.asarray(resobj.t.n_frames)
+            self.n_frames = np.atleast_1d(resobj.t.n_frames)
             self.c_n_frames = np.copy(self.n_frames)
             self.top = top
         except AttributeError:
@@ -220,7 +220,7 @@ class Analyze():
                        % ' '.join([ str(t) for t in self.params['times'] ]), fmt='%10.8f')
 
     def print_summaries(self):
-        """Print summary PF and resfrac results - for example of a method
+        """Print summary PF, resfrac and segment results - for example of a method
            object that has had results summed over multiple chunks."""
 
         
