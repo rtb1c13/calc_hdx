@@ -8,7 +8,13 @@ import matplotlib.pyplot as plt
 import os, glob, copy, itertools
 from scipy.stats import pearsonr as correl
 from matplotlib.backends.backend_pdf import PdfPages
+from cycler import cycler
 
+### Define defaults for matplotlib plots
+plt.rc('lines', linewidth=2)
+plt.rc('axes', prop_cycle=(cycler('color', ['k','b','r','g','c','m','y','orange']))) # Color cycle starts with black
+
+### Classes
 class Analyze():
     """Class to contain results and analysis methods for HDX predictions"""
 
@@ -429,7 +435,7 @@ class Plots():
                 ax.plot(xs, overlay_ys, marker='+', color='blue', linewidth=2, linestyle='--', label="Experimental")
             ax.legend(fontsize=6)
 
-        def _plot_pdf_page(startslice, endslice):
+        def _plot_pdf_page_df(startslice, endslice):
 ###         subplot2grid implementation?
 #            fig = plt.Figure(figsize=(8.5, 11)) # Letter
 #            axis_idxs = []
@@ -468,38 +474,126 @@ class Plots():
             pages = int(len(self.results.c_segfracs[-1]) / 8) + 1 # Ceiling
             try:
                 for pg in range(1, pages+1):
-                    currfig = _plot_pdf_page(8*(pg-1), 8*pg)
+                    currfig = _plot_pdf_page_df(8*(pg-1), 8*pg)
                     pdf.savefig(currfig)
                     plt.close()
             except IndexError:
-                currfig = _plot_pdf_page(8*(pg-1), len(self.results.c_segfracs[-1])) 
+                currfig = _plot_pdf_page_df(8*(pg-1), len(self.results.c_segfracs[-1])) 
                 pdf.savefig(currfig)
                 plt.close()
 
 
+    def df_convergence(self):
+        """Plot the running average of predicted deuteration fractions for each segment.
+           
+           Plots are saved to a multi-page PDF file df_convergence.pdf, with one
+           segment per page.""" 
 
-#        nrows = int(len(self.results.c_segfracs[-1]) / 2) + 1 # Ceiling
-#        fig, axs = plt.subplots(ncols=2, nrows=nrows, sharex=True, \
-#                                sharey=True, figsize=(8.4, 2.2*nrows)) 
-#        fig.suptitle("Deuterated fractions against time", fontsize=14)
-#        for ax in axs[:,0]:
-#            ax.set_ylabel("Deuterated fraction")
-#        for ax in axs[-1,:]:
-#            ax.set_xlabel("Time / min")
-#        axs = axs.flatten()
-#        if self.avail['_expt_overlay']:
-#            for a, predsegs, expt in zip(axs, \
-#                                         np.hstack((self.results.segres, self.results.c_segfracs[-1])), \
-#                                         self.results.expfracs):
-#                _plot_df_curve(a, predsegs, overlay_ys=expt)
-#        else:
-#            for a, predsegs in zip(axs, np.hstack((self.results.segres, self.results.c_segfracs[-1]))):
-#                _plot_df_curve(a, predsegs)
-#        fig.tight_layout()
-#        fig.subplots_adjust(top=0.95)
-#        fig.savefig("Test_df_curve.png", dpi=300)
+        def _plot_df_convergence(block_fracs, cumul_fracs, seg):
+            fig = plt.figure(figsize=(11, 8.5)) # Letter
+            fig.suptitle("Convergence of predicted fractions across trajectory", fontsize=16)
+            ax = fig.gca()
+            ax.set_title("Segment %s-%s" % (seg[0], seg[1]), fontsize=12)
+            xs = self.results.c_n_frames
+            for timeidx in range(len(self.results.params['times'])):
+                ax.plot(xs, cumul_fracs[:, timeidx], label="Time %s min" % self.results.params['times'][timeidx])
+                ax.scatter(xs, block_fracs[:, timeidx], marker='x')
+            ax.set_ylim(0.0, 1.25) # Space for legend
+            ax.set_yticks(np.arange(0.0,1.2,0.2))
+            ax.set_xlim(0, xs[-1] * 1.05) 
+            ax.legend(loc='upper center', fontsize=8)
+            return fig
+                
+        with PdfPages("df_convergence.pdf") as pdf:
+            for i, currseg in enumerate(self.results.segres):
+                currfig = _plot_df_convergence(self.results.segfracs[:,i,:], \
+                                               self.results.c_segfracs[:,i,:], \
+                                               currseg)
+                pdf.savefig(currfig)
+                plt.close()
 
+    def seg_curve(self):
+        """Plot by-segment deuterated fractions at a given timepoint
+           
+           Plots are saved to a multi-page PDF file seg_curves.pdf, with one
+           timepoint per page and a final plot of all timepoints. Plots are
+           optionally overlaid with experimental curves, according to the 
+           value of Plots.avail['_expt_overlay'].""" 
 
+        def _plot_seg_curve(cumul_fracs, seglist, time, overlay_fracs=None):
+            fig = plt.figure(figsize=(11,8.5)) # Letter
+            ax = fig.gca()
+            xs = range(1,len(seglist)+1)
+            labels = [ str(i[0])+"-"+str(i[1]) for i in seglist ]
+            ax.set_title("Time = %s min" % time, fontsize=12)
+            ax.set_xticks(xs)
+            ax.set_xticklabels(labels, rotation='vertical')
+            ax.set_ylabel("Deuterated fraction")
+            ax.set_xlabel("Peptide segment")
+            ax.set_ylim(0.0, 1.0)
 
+            if overlay_fracs is not None:
+                ax.plot(xs, cumul_fracs, \
+                        label="Predicted fraction, R = %3.2f" % self.results.correls[timeidx])
+                ax.plot(xs, overlay_fracs, \
+                        label="Experimental fraction", linestyle='--')
+                fig.suptitle("By-segment predicted & experimental deuterated fractions", \
+                             fontsize=16)
+            else:
+                ax.plot(xs, cumul_fracs, label="Predicted fraction")
+                fig.suptitle("By-segment predicted deuterated fractions", \
+                             fontsize=16)
+            ax.legend()
+            return fig
+
+        def _plot_all_seg_curves(cumul_fracs, seglist, times, overlay_fracs=None):
+            fig = plt.figure(figsize=(11,8.5)) # Letter
+            ax = fig.gca()
+            xs = range(1,len(seglist)+1)
+            labels = [ str(i[0])+"-"+str(i[1]) for i in seglist ]
+            ax.set_title("All timepoints (times in min)", fontsize=12)
+            ax.set_xticks(xs)
+            ax.set_xticklabels(labels, rotation='vertical')
+            ax.set_ylabel("Deuterated fraction")
+            ax.set_xlabel("Peptide segment")
+            ax.set_ylim(0.0, 1.0)
+
+            for timeidx, t in enumerate(times):
+                if overlay_fracs is not None:
+                    predline = ax.plot(xs, cumul_fracs[:,timeidx], \
+                                       label="Predicted @ time %s, R = %3.2f" \
+                                       % (t, self.results.correls[timeidx]))
+                    ax.plot(xs, overlay_fracs[:, timeidx], \
+                            label="Experimental @ time %s" % t, linestyle='--', \
+                            color=predline[0].get_color(), linewidth=1, alpha=0.5)
+                    fig.suptitle("By-segment predicted & experimental deuterated fractions", \
+                                 fontsize=16)
+                else:
+                    ax.plot(xs, cumul_fracs[:, timeidx], label="Predicted @ time %s" % t)
+                    fig.suptitle("By-segment predicted deuterated fractions", \
+                                 fontsize=16)
+            ax.legend()
+            return fig
+                    
+        with PdfPages("seg_curves.pdf") as pdf:
+            # Single timepoint plots
+            for timeidx, t in enumerate(self.results.params['times']):
+                if self.avail['_expt_overlay']:
+                    currfig = _plot_seg_curve(self.results.c_segfracs[-1,:,timeidx], \
+                                              self.results.segres, t, self.results.expfracs[:,timeidx])
+                else:
+                    currfig = _plot_seg_curve(self.results.c_segfracs[-1,:,timeidx], \
+                                              self.results.segres, t)
+                pdf.savefig(currfig)
+                plt.close()
+            # All timepoint plot
+            if self.avail['_expt_overlay']:
+                currfig = _plot_all_seg_curves(self.results.c_segfracs[-1], self.results.segres, \
+                                     self.results.params['times'], overlay_fracs=self.results.expfracs)
+            else:
+                currfig = _plot_all_seg_curves(self.results.c_segfracs[-1], self.results.segres, \
+                                     self.results.params['times'])
+            pdf.savefig(currfig)
+            plt.close()
 
 ### Add further classes below here
