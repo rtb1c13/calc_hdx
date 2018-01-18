@@ -403,12 +403,32 @@ class Radou():
     def assign_termini(self):
         """Assigns flags to N and C terminal residues"""
 
+        nterm_manual, cterm_manual = False, False
         for c in self.top.chains:
-            c.residue(0).nterm = np.ones(self.t.n_frames, dtype=bool)
-            c.residue(-1).cterm = np.ones(self.t.n_frames, dtype=bool)
+            if c.residue(0).is_protein:
+                c.residue(0).nterm = np.ones(self.t.n_frames, dtype=bool)
+                nterm = c.residue(0)
+            else:
+                nterm_manual = True
+                nterm_idx = self.top.select("protein")[0]
+                nterm = self.top.atom(nterm_idx).residue
+                nterm.nterm = np.ones(self.t.n_frames, dtype=bool)
+            if c.residue(-1).is_protein:
+                c.residue(-1).cterm = np.ones(self.t.n_frames, dtype=bool)
+                cterm = c.residue(-1)
+            else:
+                cterm_manual = True
+                cterm_idx = self.top.select("protein")[-1]
+                cterm = self.top.atom(cterm_idx).residue
+                cterm.cterm = np.ones(self.t.n_frames, dtype=bool)
             with open(self.params['logfile'], 'a') as f:
+                if any((nterm_manual, cterm_manual)):
+                    f.write("One or more of the chain termini is not a protein residue.\n"
+                            "This could be because you don't have chain info in your topology?\n"
+                            "Selecting termini from protein residues instead.\n")
+                
                 f.write("N-terminus identified at: %s\nC-terminus identified at: %s\n" \
-                         % (c.residue(0), c.residue(-1)))
+                         % (nterm, cterm))
 
 
     # Helper function to turn sequence-specific rate adjustments to intrinsic acid/base/water rates

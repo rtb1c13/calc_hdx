@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os, glob, copy, itertools
 from scipy.stats import pearsonr as correl
+from matplotlib.backends.backend_pdf import PdfPages
 
 class Analyze():
     """Class to contain results and analysis methods for HDX predictions"""
@@ -256,9 +257,9 @@ class Analyze():
         self.MUE = np.zeros(len(self.params['times']))
         self.MSE = np.zeros(len(self.params['times']))
         for idx, t in enumerate(self.params['times']):
-            self.correls[idx] = correl(self.segfracs[:,idx], self.expfracs[:,idx])[0]
-            self.MSE[idx] = np.mean(self.segfracs[:,idx] - self.expfracs[:,idx])
-            self.MUE[idx] = np.mean(np.abs(self.segfracs[:,idx] - self.expfracs[:,idx]))
+            self.correls[idx] = correl(self.c_segfracs[-1][:,idx], self.expfracs[:,idx])[0]
+            self.MSE[idx] = np.mean(self.c_segfracs[-1][:,idx] - self.expfracs[:,idx])
+            self.MUE[idx] = np.mean(np.abs(self.c_segfracs[-1][:,idx] - self.expfracs[:,idx]))
         with open(self.params['outprefix']+"Descriptive_statistics.dat", 'a') as f:
             np.savetxt(f, self.correls, header="Pearson's R correlation, Times / min: %s" \
                        % ' '.join([ str(t) for t in self.params['times'] ]), fmt='%8.6f')
@@ -411,40 +412,92 @@ class Plots():
     def df_curve(self):
         """Plot a predicted deuteration curve for each segment. Plots are optionally
            overlaid with experimental curves, according to the value of
-           Plots.avail['_expt_overlay']""" 
+           Plots.avail['_expt_overlay'].
+
+           Plots are saved to a multi-page PDF file df_curves.pdf, with up to
+           8 segments per page.""" 
 
         def _plot_df_curve(ax, segdata, overlay_ys=None, **plot_opts):
             xs, ys = self.results.params['times'], segdata[2:]
-            ax.plot(xs, ys, color='black', linewidth=2, linestyle='-', label="Predicted", **plot_opts)
+            ax.plot(xs, ys, marker='x', color='black', linewidth=2, linestyle='-', label="Predicted", **plot_opts)
             ax.set_title("Segment %d-%d" % (segdata[0], segdata[1]), fontsize=9)
             ax.set_xlim(0.0, xs[-1])
             ax.set_ylim(0.0, 1.0)
             ax.set_xbound(upper=xs[-1])
 
             if overlay_ys is not None:
-                ax.plot(xs, overlay_ys, color='blue', linewidth=2, linestyle='--', label="Experimental")
+                ax.plot(xs, overlay_ys, marker='+', color='blue', linewidth=2, linestyle='--', label="Experimental")
             ax.legend(fontsize=6)
 
-        nrows = int(len(self.results.c_segfracs[-1]) / 2) + 1 # Ceiling
-        fig, axs = plt.subplots(ncols=2, nrows=nrows, sharex=True, \
-                                sharey=True, figsize=(8.4, 2.2*nrows)) 
-        fig.suptitle("Deuterated fractions against time", fontsize=14)
-        for ax in axs[:,0]:
-            ax.set_ylabel("Deuterated fraction")
-        for ax in axs[-1,:]:
-            ax.set_xlabel("Time / min")
-        axs = axs.flatten()
-        if self.avail['_expt_overlay']:
-            for a, predsegs, expt in zip(axs, \
-                                         np.hstack((self.results.segres, self.results.c_segfracs[-1])), \
-                                         self.results.expfracs):
-                _plot_df_curve(a, predsegs, overlay_ys=expt)
-        else:
-            for a, predsegs in zip(axs, np.hstack((self.results.segres, self.results.c_segfracs[-1]))):
-                _plot_df_curve(a, predsegs)
-        fig.tight_layout()
-        fig.subplots_adjust(top=0.95)
-        fig.savefig("Test_df_curve.png", dpi=300)
+        def _plot_pdf_page(startslice, endslice):
+###         subplot2grid implementation?
+#            fig = plt.Figure(figsize=(8.5, 11)) # Letter
+#            axis_idxs = []
+#            for row in range(4):
+#                for col in range(2):
+#                    axis_idxs.append((row, col))
+#            data_and_axes = zip(data_slice, axis_idxs):
+#            d1 = data_and_axes.pop(0)
+#            _plot_df_curve(
+#            d2 = data_and_axes.pop(0)
+#            ax1 = plt.subplot2grid((4,2),d1[1])
+#            _plot_df_curve(ax1, d1[0]
+#            ax7 = plt.subplot2grid((4,2),d7[1], sharey=ax8)
+#            for odd in da
+
+            fig, axs = plt.subplots(ncols=2, nrows=4, sharex=True, \
+                                    sharey=True, figsize=(8.5, 11)) # Letter
+            fig.suptitle("Deuterated fractions against time", fontsize=14)
+            for ax in axs[:,0]:
+                ax.set_ylabel("Deuterated fraction")
+            for ax in axs[-1,:]:
+                ax.set_xlabel("Time / min")
+            axs = axs.flatten()
+            if self.avail['_expt_overlay']:
+                for a, predsegs, expt in zip(axs, \
+                                             np.hstack((self.results.segres, self.results.c_segfracs[-1]))[startslice:endslice+1], \
+                                             self.results.expfracs[startslice:endslice+1]):
+                    _plot_df_curve(a, predsegs, overlay_ys=expt)
+            else:
+                for a, predsegs in zip(axs, np.hstack((self.results.segres, self.results.c_segfracs[-1]))[startslice:endslice+1]):
+                    _plot_df_curve(a, predsegs)
+
+            return fig
+
+        with PdfPages("df_curves.pdf") as pdf:
+            pages = int(len(self.results.c_segfracs[-1]) / 8) + 1 # Ceiling
+            try:
+                for pg in range(1, pages+1):
+                    currfig = _plot_pdf_page(8*(pg-1), 8*pg)
+                    pdf.savefig(currfig)
+                    plt.close()
+            except IndexError:
+                currfig = _plot_pdf_page(8*(pg-1), len(self.results.c_segfracs[-1])) 
+                pdf.savefig(currfig)
+                plt.close()
+
+
+
+#        nrows = int(len(self.results.c_segfracs[-1]) / 2) + 1 # Ceiling
+#        fig, axs = plt.subplots(ncols=2, nrows=nrows, sharex=True, \
+#                                sharey=True, figsize=(8.4, 2.2*nrows)) 
+#        fig.suptitle("Deuterated fractions against time", fontsize=14)
+#        for ax in axs[:,0]:
+#            ax.set_ylabel("Deuterated fraction")
+#        for ax in axs[-1,:]:
+#            ax.set_xlabel("Time / min")
+#        axs = axs.flatten()
+#        if self.avail['_expt_overlay']:
+#            for a, predsegs, expt in zip(axs, \
+#                                         np.hstack((self.results.segres, self.results.c_segfracs[-1])), \
+#                                         self.results.expfracs):
+#                _plot_df_curve(a, predsegs, overlay_ys=expt)
+#        else:
+#            for a, predsegs in zip(axs, np.hstack((self.results.segres, self.results.c_segfracs[-1]))):
+#                _plot_df_curve(a, predsegs)
+#        fig.tight_layout()
+#        fig.subplots_adjust(top=0.95)
+#        fig.savefig("Test_df_curve.png", dpi=300)
 
 
 
