@@ -13,6 +13,7 @@ from cycler import cycler
 ### Define defaults for matplotlib plots
 plt.rc('lines', linewidth=2)
 plt.rc('axes', prop_cycle=(cycler('color', ['k','b','r','g','c','m','y','orange']))) # Color cycle starts with black
+#plt.rc('text', usetex=True)
 
 ### Classes
 class Analyze():
@@ -371,11 +372,11 @@ class Plots():
         self.avail = { 'df_curve' : False,
                        'df_convergence' : False,
                        'seg_curve' : False,
-                       'seg_convergence' : False,
-                       'pf_curve' : False,
+                       'seg_range' : False,
+                       'pf_byres' : False,
                        'tot_pf' : False,
                        '_expt_overlay' : False,
-                       '_block_ave' : False }
+                       '_block_ave' : False } # Currently unused
 
         try:
             self.results.c_resfracs[-1]
@@ -513,7 +514,7 @@ class Plots():
                 plt.close()
 
     def seg_curve(self):
-        """Plot by-segment deuterated fractions at a given timepoint
+        """Plot by-segment deuterated fractions at a given timepoint.
            
            Plots are saved to a multi-page PDF file seg_curves.pdf, with one
            timepoint per page and a final plot of all timepoints. Plots are
@@ -595,5 +596,102 @@ class Plots():
                                      self.results.params['times'])
             pdf.savefig(currfig)
             plt.close()
+
+
+    def seg_range(self):
+        """Plot by-segment deuterated fractions at a given timepoint, with
+           shaded standard deviation of by-segment fractions from block averages.
+           
+           Plots are saved to a multi-page PDF file seg_range.pdf, with one
+           timepoint per page.""" 
+
+        def _plot_seg_curve(cumul_fracs, seglist, blocksize, time, ax):
+            xs = range(1,len(seglist)+1)
+            labels = [ str(i[0])+"-"+str(i[1]) for i in seglist ]
+            ax.set_title("Time = %s min, block size = %d" % (time, blocksize), fontsize=12)
+            ax.set_xticks(xs)
+            ax.set_xticklabels(labels, rotation='vertical')
+            ax.set_ylabel("Deuterated fraction")
+            ax.set_xlabel("Peptide segment")
+            ax.set_ylim(0.0, 1.0)
+
+            ax.plot(xs, cumul_fracs, label="Final predicted fraction")
+            return ax
+
+        def _fill_seg_range(seg_fracs, seglist, ax, cumul_fracs=None):
+            xs = range(1,len(seglist)+1)
+            segmaxs, segmins = np.zeros(seg_fracs.shape[1]), np.zeros(seg_fracs.shape[1])
+#            for segidx in range(len(segmaxs)):
+#                segmaxs[segidx] = np.max(seg_fracs[:, segidx])
+#                segmins[segidx] = np.min(seg_fracs[:, segidx])
+            # Optional +/- std dev
+            for segidx in range(len(segmaxs)):
+                segmaxs[segidx] = np.std(seg_fracs[:, segidx])
+                segmins[segidx] = -1 * np.std(seg_fracs[:, segidx])
+            segmaxs += cumul_fracs
+            segmins += cumul_fracs
+            ax.fill_between(xs, segmaxs, segmins, color='gray', alpha=0.3, label="Std. Dev. across trajectory blocks")
+            return ax
+
+        with PdfPages("seg_range.pdf") as pdf:
+            for timeidx, currtime in enumerate(self.results.params['times']):
+                fig = plt.figure(figsize=(11, 8.5))
+                ax1 = fig.gca()
+                fig.suptitle("Variation in by-segment predicted deuterated fractions across trajectory", \
+                             fontsize=16)
+                ax1 = _plot_seg_curve(self.results.c_segfracs[-1,:,timeidx], self.results.segres, \
+                                      self.results.n_frames[0], \
+                                      currtime, ax1)
+#                ax1 = _fill_seg_range(self.results.segfracs[:,:,timeidx], self.results.segres, ax1)
+                 # Optional +/- std.dev
+                ax1 = _fill_seg_range(self.results.segfracs[:,:,timeidx], self.results.segres, ax1, \
+                                      self.results.c_segfracs[-1,:,timeidx])
+                ax1.legend()
+                pdf.savefig(fig)
+                plt.close()
+            
+    def pf_byres(self):
+        """Plot by-residue protection factors averaged over all frames,
+           both in raw and log10 scaled forms.
+           
+           Plots are saved to a multi-page PDF file pf_byres.pdf""" 
+
+        with PdfPages("pf_byres.pdf") as pdf:
+            # Raw PFs
+            fig = plt.figure(figsize=(11, 8.5)) # Letter
+            ax = fig.gca()
+            initial, final = self.results.reslist[0], self.results.reslist[-1]
+            xs = self.results.reslist
+            xticknums = [initial]
+            intermedx = range(50, final - 24, 50) # Residue labels at 50 res intervals
+                                                  # skipping last label if it's within 25 of the previous
+            xticknums.extend(intermedx)
+            xticknums.append(final)
+            ax.plot(xs, self.results.c_pfs[-1], linewidth=1)
+            ax.set_title("Mean by-residue protection factors", fontsize=16)
+            ax.set_ylabel("Protection factor")
+            ax.set_xlabel("Residue")
+            ax.set_xticks(xticknums)
+            pdf.savefig(fig)
+            plt.close()
+
+            # Log PFs
+            fig = plt.figure(figsize=(11, 8.5)) # Letter
+            ax = fig.gca()
+            initial, final = self.results.reslist[0], self.results.reslist[-1]
+            xs = self.results.reslist
+            xticknums = [initial]
+            intermedx = range(50, final - 24, 50) # Residue labels at 50 res intervals
+                                                  # skipping last label if it's within 25 of the previous
+            xticknums.extend(intermedx)
+            xticknums.append(final)
+            ax.plot(xs, np.log10(self.results.c_pfs[-1]), linewidth=1)
+            ax.set_title("Log of mean by-residue protection factors", fontsize=16)
+            ax.set_ylabel(r'$log_{10}$(Protection factor)')
+            ax.set_xlabel("Residue")
+            ax.set_xticks(xticknums)
+            pdf.savefig(fig)
+            plt.close()
+
 
 ### Add further classes below here
