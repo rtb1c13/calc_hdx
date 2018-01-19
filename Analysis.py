@@ -378,6 +378,12 @@ class Plots():
                        '_expt_overlay' : False,
                        '_block_ave' : False } # Currently unused
 
+        self._funcdict = { 'df_curve' : self.df_curve,
+                           'df_convergence' : self.df_convergence,
+                           'seg_curve' : self.seg_curve,
+                           'seg_range' : self.seg_range,
+                           'pf_byres' : self.pf_byres,
+                           'tot_pf' : self.tot_pf }
         try:
             self.results.c_resfracs[-1]
             self.avail['df_curve'] = True
@@ -389,19 +395,14 @@ class Plots():
             self.results.c_segfracs[-1]
             self.avail['seg_curve'] = True
             if len(self.results.c_segfracs) > 1:
-                self.avail['seg_convergence'] = True
+                self.avail['seg_range'] = True
         except (AttributeError, IndexError):
             pass
         try:
-            self.avail['pf_curve'] = ( len(self.results.c_pfs[-1]) == len(self.results.reslist) )
+            self.avail['pf_byres'] = ( len(self.results.c_pfs[-1]) == len(self.results.reslist) )
             if len(self.results.c_pfs) > 1:
                 self.avail['tot_pf'] = True
         except (AttributeError, IndexError):
-            pass
-        try:
-            if len(self.results.c_pfs) > 1:
-                self.avail['tot_pf'] = True
-        except AttributeError:
             pass
         try:
             # Other data soundness checks (for times, segres) are in Analyze.read_expfile
@@ -410,11 +411,17 @@ class Plots():
             pass
 
         # Overrides
-        try:
-            self.avail.update(override_opts)
-            print("Available plots manually overriden for plots: %s" % ", ".join(override_opts.keys()))
-        except (TypeError, ValueError):
-            print("Available plots automatically chosen without overrides")
+        if override_opts == None:
+            with open(self.results.params['logfile'], 'a') as f:
+                f.write("Available plots automatically chosen without overrides\n")
+        else:
+            try:
+                self.avail.update(override_opts)
+                with open(self.results.params['logfile'], 'a') as f:
+                    f.write("Available plots manually overriden for plots: %s \n" % ", ".join(override_opts.keys()))
+            except (TypeError, ValueError):
+                with open(self.results.params['logfile'], 'a') as f:
+                    f.write("Available plots automatically chosen without overrides\n")
         
     def df_curve(self):
         """Plot a predicted deuteration curve for each segment. Plots are optionally
@@ -502,6 +509,8 @@ class Plots():
             ax.set_ylim(0.0, 1.25) # Space for legend
             ax.set_yticks(np.arange(0.0,1.2,0.2))
             ax.set_xlim(0, xs[-1] * 1.05) 
+            ax.set_xlabel("Trajectory frame") 
+            ax.set_ylabel("Deuterated fraction") 
             ax.legend(loc='upper center', fontsize=8)
             return fig
                 
@@ -692,6 +701,60 @@ class Plots():
             ax.set_xticks(xticknums)
             pdf.savefig(fig)
             plt.close()
+
+    def tot_pf(self):
+        """Plot convergence of total protection factor,
+           both in raw and log10 scaled forms.
+           
+           Plots are saved to a multi-page PDF file tot_pf.pdf""" 
+
+        def _get_ylim(minpf, maxpf):
+            maxexp = np.floor(np.log10(maxpf))
+            maxy = np.ceil(maxpf/10**maxexp) * 10**maxexp
+            minexp = np.floor(np.log10(minpf))
+            miny = np.floor(minpf/10**minexp) * 10**minexp
+            return miny, maxy
+
+        with PdfPages("tot_pf.pdf") as pdf:
+            # Raw PFs
+            fig = plt.figure(figsize=(11, 8.5)) # Letter
+            ax = fig.gca()
+            xs = self.results.c_n_frames
+            ax.scatter(xs, np.sum(self.results.pfs, axis=1), label="Block protection factor", marker='x')
+            ax.plot(xs, np.sum(self.results.c_pfs, axis=1), label="Running average")
+            ax.set_title("Total protection factors across trajectory", fontsize=16)
+            ax.set_ylabel("Protection factor")
+            ax.set_xlabel("Trajectory frame")
+            ax.set_xlim(0, self.results.c_n_frames[-1] * 1.05)
+            ax.set_ylim(_get_ylim(np.min(np.sum(self.results.pfs, axis=1)), np.max(np.sum(self.results.pfs, axis=1)))) 
+            ax.legend()
+            pdf.savefig(fig)
+            plt.close()
+            # Log PFs
+            fig = plt.figure(figsize=(11, 8.5)) # Letter
+            ax = fig.gca()
+            xs = self.results.c_n_frames
+            ax.scatter(xs, np.log10(np.sum(self.results.pfs, axis=1)), label="Block protection factor", marker='x')
+            ax.plot(xs, np.log10(np.sum(self.results.c_pfs, axis=1)), label="Running average")
+            ax.set_title("Log of total protection factors across trajectory", fontsize=16)
+            ax.set_ylabel(r'$log_{10}$(Protection factor)')
+            ax.set_xlabel("Trajectory frame")
+            ax.set_xlim(0, self.results.c_n_frames[-1] * 1.05)
+            ax.set_ylim(np.floor(np.log10(np.max(np.sum(self.results.pfs, axis=1)))), \
+                        np.ceil(np.log10(np.max(np.sum(self.results.pfs, axis=1))))) 
+            ax.legend()
+            pdf.savefig(fig)
+            plt.close()
+        
+    def run(self, **plot_overrides):
+        self.choose_plots(**plot_overrides)
+        for key, val in self.avail.iteritems():
+            if val:
+                try:
+                    self._funcdict[key]()
+                except KeyError:     # For expt/block ave flags
+                    continue
+
 
 
 ### Add further classes below here

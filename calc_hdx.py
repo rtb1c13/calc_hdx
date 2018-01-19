@@ -173,3 +173,6 @@ if __name__ == '__main__':
     analysis.run()
     if args.chunks is not None:
         analysis.print_summaries()
+    # Automatic basic plotting
+    plots = Analysis.Plots(analysis)
+    plots.run()
