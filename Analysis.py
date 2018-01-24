@@ -11,8 +11,15 @@ from matplotlib.backends.backend_pdf import PdfPages
 from cycler import cycler
 
 ### Define defaults for matplotlib plots
-plt.rc('lines', linewidth=2)
-plt.rc('axes', prop_cycle=(cycler('color', ['k','b','r','g','c','m','y','orange']))) # Color cycle starts with black
+plt.rc('lines', linewidth=1.5, markersize=4)
+plt.rc('axes', prop_cycle=(cycler('color', ['k','b','r','g','c','m','y','orange'])), # Color cycle defaults to black
+#       spines.top=False, spines.right=False, # Switch off top/right axes
+       labelweight='heavy', labelsize=14, titlesize=18) # Default fontsizes for printing
+plt.rc('axes.spines', top=False, right=False) # Switch off top/right axes
+plt.rc('legend', fontsize=10) # Default fontsizes for printing
+plt.rc('xtick', labelsize=12) # Default fontsizes for printing
+plt.rc('ytick', labelsize=12) # Default fontsizes for printing
+plt.rc('figure', titlesize=22, titleweight='heavy') # Default fontsizes for printing
 #plt.rc('text', usetex=True)
 
 ### Classes
@@ -372,7 +379,7 @@ class Plots():
         self.avail = { 'df_curve' : False,
                        'df_convergence' : False,
                        'seg_curve' : False,
-                       'seg_range' : False,
+#                       'seg_range' : False,
                        'pf_byres' : False,
                        'tot_pf' : False,
                        '_expt_overlay' : False,
@@ -381,7 +388,7 @@ class Plots():
         self._funcdict = { 'df_curve' : self.df_curve,
                            'df_convergence' : self.df_convergence,
                            'seg_curve' : self.seg_curve,
-                           'seg_range' : self.seg_range,
+#                           'seg_range' : self.seg_range,
                            'pf_byres' : self.pf_byres,
                            'tot_pf' : self.tot_pf }
         try:
@@ -394,8 +401,8 @@ class Plots():
         try:
             self.results.c_segfracs[-1]
             self.avail['seg_curve'] = True
-            if len(self.results.c_segfracs) > 1:
-                self.avail['seg_range'] = True
+#            if len(self.results.c_segfracs) > 1:
+#                self.avail['seg_range'] = True
         except (AttributeError, IndexError):
             pass
         try:
@@ -433,17 +440,34 @@ class Plots():
 
         def _plot_df_curve(ax, segdata, overlay_ys=None, **plot_opts):
             xs, ys = self.results.params['times'], segdata[2:]
-            ax.plot(xs, ys, marker='x', color='black', linewidth=2, linestyle='-', label="Predicted", **plot_opts)
+            ax.plot(xs, ys, marker='o', color='black', linewidth=1.5, linestyle='-', label="Predicted", **plot_opts)
             ax.set_title("Segment %d-%d" % (segdata[0], segdata[1]), fontsize=9)
-            ax.set_xlim(0.0, xs[-1])
-            ax.set_ylim(0.0, 1.0)
-            ax.set_xbound(upper=xs[-1])
+            ax.set_xlim(0.0 - xs[-1]*0.05, xs[-1] *1.05) # 5% buffers - do this as log?
+            ax.set_ylim(-0.05, 1.05)
+            final = xs[-1]
+            xticknums = range(0, int(final) - 14, 30) # Residue labels at 30 min intervals
+                                                      # skipping last label if it's within 15 of the previous
+            xticknums.append(final)
+            ax.set_xticks(xticknums)
+            ax.set_yticks(np.arange(0.0, 1.2, 0.2))
 
             if overlay_ys is not None:
-                ax.plot(xs, overlay_ys, marker='+', color='blue', linewidth=2, linestyle='--', label="Experimental")
+                ax.plot(xs, overlay_ys, marker='^', color='blue', linewidth=1.5, linestyle=':', label="Experimental")
             ax.legend(fontsize=6)
 
-        def _plot_pdf_page_df(startslice, endslice):
+        def _plot_log_df_curve(ax, segdata, overlay_ys=None, **plot_opts):
+            xs, ys = self.results.params['times'], segdata[2:]
+            ax.plot(xs, ys, marker='o', color='black', linewidth=1.5, linestyle='-', label="Predicted", **plot_opts)
+            ax.set_title("Segment %d-%d" % (segdata[0], segdata[1]), fontsize=9)
+            ax.set_ylim(-0.05, 1.05)
+            ax.set_xscale('log')
+            ax.set_yticks(np.arange(0.0, 1.2, 0.2))
+
+            if overlay_ys is not None:
+                ax.plot(xs, overlay_ys, marker='^', color='blue', linewidth=1.5, linestyle=':', label="Experimental")
+            ax.legend(fontsize=6)
+
+        def _plot_pdf_pages_df(startslice, endslice):
 ###         subplot2grid implementation?
 #            fig = plt.Figure(figsize=(8.5, 11)) # Letter
 #            axis_idxs = []
@@ -457,37 +481,62 @@ class Plots():
 #            ax1 = plt.subplot2grid((4,2),d1[1])
 #            _plot_df_curve(ax1, d1[0]
 #            ax7 = plt.subplot2grid((4,2),d7[1], sharey=ax8)
-#            for odd in da
 
-            fig, axs = plt.subplots(ncols=2, nrows=4, sharex=True, \
-                                    sharey=True, figsize=(8.5, 11)) # Letter
-            fig.suptitle("Deuterated fractions against time", fontsize=14)
-            for ax in axs[:,0]:
-                ax.set_ylabel("Deuterated fraction")
-            for ax in axs[-1,:]:
-                ax.set_xlabel("Time / min")
-            axs = axs.flatten()
+            fig1, axs1 = plt.subplots(ncols=4, nrows=3, sharex=True, \
+                                     sharey=True, figsize=(11, 8.5)) # Letter
+#            fig1.suptitle("Deuterated fractions against time", fontsize=18)
+            fig1.suptitle("Deuterated fractions against time")
+            for ax in axs1[:,0]:
+                ax.set_ylabel("Deuterated fraction", fontsize=12)
+            for ax in axs1[-1,:]:
+                ax.set_xlabel("Time / min", fontsize=12)
+            axs1 = axs1.flatten()
             if self.avail['_expt_overlay']:
-                for a, predsegs, expt in zip(axs, \
+                for a, predsegs, expt in zip(axs1, \
                                              np.hstack((self.results.segres, self.results.c_segfracs[-1]))[startslice:endslice+1], \
                                              self.results.expfracs[startslice:endslice+1]):
                     _plot_df_curve(a, predsegs, overlay_ys=expt)
             else:
-                for a, predsegs in zip(axs, np.hstack((self.results.segres, self.results.c_segfracs[-1]))[startslice:endslice+1]):
+                for a, predsegs in zip(axs1, np.hstack((self.results.segres, self.results.c_segfracs[-1]))[startslice:endslice+1]):
                     _plot_df_curve(a, predsegs)
 
-            return fig
+            fig2, axs2 = plt.subplots(ncols=4, nrows=3, sharex=True, \
+                                     sharey=True, figsize=(11, 8.5)) # Letter
+#            fig2.suptitle("Deuterated fractions against time (log-scaled)", fontsize=18)
+            fig2.suptitle("Deuterated fractions against time (log-scaled)")
+            for ax in axs2[:,0]:
+                ax.set_ylabel("Deuterated fraction", fontsize=12)
+            for ax in axs2[-1,:]:
+#                ax.set_xlabel("Time / min")
+                ax.set_xlabel("Time / min (log-scaled)", fontsize=12)
+            axs2 = axs2.flatten()
+            if self.avail['_expt_overlay']:
+                for a, predsegs, expt in zip(axs2, \
+                                             np.hstack((self.results.segres, self.results.c_segfracs[-1]))[startslice:endslice+1], \
+                                             self.results.expfracs[startslice:endslice+1]):
+                    _plot_log_df_curve(a, predsegs, overlay_ys=expt)
+            else:
+                for a, predsegs in zip(axs2, np.hstack((self.results.segres, self.results.c_segfracs[-1]))[startslice:endslice+1]):
+                    _plot_log_df_curve(a, predsegs)
+
+            return fig1, fig2
 
         with PdfPages("df_curves.pdf") as pdf:
-            pages = int(len(self.results.c_segfracs[-1]) / 8) + 1 # Ceiling
+            pages = int(len(self.results.c_segfracs[-1]) / 12) + 1 # Ceiling
+            logfigs = []
             try:
                 for pg in range(1, pages+1):
-                    currfig = _plot_pdf_page_df(8*(pg-1), 8*pg)
+                    currfig, logfig = _plot_pdf_pages_df(12*(pg-1), 12*pg)
+                    logfigs.append(logfig)
                     pdf.savefig(currfig)
                     plt.close()
             except IndexError:
-                currfig = _plot_pdf_page_df(8*(pg-1), len(self.results.c_segfracs[-1])) 
+                currfig, logfig = _plot_pdf_pages_df(12*(pg-1), len(self.results.c_segfracs[-1])) 
+                logfigs.append(logfig)
                 pdf.savefig(currfig)
+                plt.close()
+            for currlogfig in logfigs:
+                pdf.savefig(currlogfig)
                 plt.close()
 
 
@@ -499,19 +548,27 @@ class Plots():
 
         def _plot_df_convergence(block_fracs, cumul_fracs, seg):
             fig = plt.figure(figsize=(11, 8.5)) # Letter
-            fig.suptitle("Convergence of predicted fractions across trajectory", fontsize=16)
+#            fig.suptitle("Convergence of predicted fractions across trajectory", fontsize=16)
+            fig.suptitle("Convergence of predicted fractions across trajectory")
             ax = fig.gca()
-            ax.set_title("Segment %s-%s" % (seg[0], seg[1]), fontsize=12)
+#            ax.set_title("Segment %s-%s" % (seg[0], seg[1]), fontsize=12)
+            ax.set_title("Segment %s-%s" % (seg[0], seg[1]))
             xs = self.results.c_n_frames
             for timeidx in range(len(self.results.params['times'])):
                 ax.plot(xs, cumul_fracs[:, timeidx], label="Time %s min" % self.results.params['times'][timeidx])
-                ax.scatter(xs, block_fracs[:, timeidx], marker='x')
+                ax.scatter(xs, block_fracs[:, timeidx], marker='o')
             ax.set_ylim(0.0, 1.25) # Space for legend
             ax.set_yticks(np.arange(0.0,1.2,0.2))
             ax.set_xlim(0, xs[-1] * 1.05) 
+            final = xs[-1]
+            blocksize = self.results.n_frames[0]
+            xticknums = range(0, int(final) - (blocksize / 2 +1), blocksize) # Tick labels at block intervals
+                                                                             # skipping last label if it's within 1/2 of previous
+            xticknums.append(final)
+            ax.set_xticks(xticknums)
             ax.set_xlabel("Trajectory frame") 
             ax.set_ylabel("Deuterated fraction") 
-            ax.legend(loc='upper center', fontsize=8)
+            ax.legend(loc='upper center')
             return fig
                 
         with PdfPages("df_convergence.pdf") as pdf:
@@ -530,12 +587,11 @@ class Plots():
            optionally overlaid with experimental curves, according to the 
            value of Plots.avail['_expt_overlay'].""" 
 
-        def _plot_seg_curve(cumul_fracs, seglist, time, overlay_fracs=None):
-            fig = plt.figure(figsize=(11,8.5)) # Letter
-            ax = fig.gca()
+        def _plot_seg_curve(ax, cumul_fracs, seglist, blocksize, time, overlay_fracs=None):
             xs = range(1,len(seglist)+1)
             labels = [ str(i[0])+"-"+str(i[1]) for i in seglist ]
-            ax.set_title("Time = %s min" % time, fontsize=12)
+#            ax.set_title("Time = %s min, block size = %d" % (time, blocksize), fontsize=12)
+            ax.set_title("Time = %s min, block size = %d" % (time, blocksize))
             ax.set_xticks(xs)
             ax.set_xticklabels(labels, rotation='vertical')
             ax.set_ylabel("Deuterated fraction")
@@ -546,88 +602,18 @@ class Plots():
                 ax.plot(xs, cumul_fracs, \
                         label="Predicted fraction, R = %3.2f" % self.results.correls[timeidx])
                 ax.plot(xs, overlay_fracs, \
-                        label="Experimental fraction", linestyle='--')
-                fig.suptitle("By-segment predicted & experimental deuterated fractions", \
-                             fontsize=16)
+                        label="Experimental fraction", linestyle=':')
+#                fig.suptitle("By-segment predicted & experimental deuterated fractions", \
+#                             fontsize=16)
+                fig.suptitle("By-segment predicted & experimental deuterated fractions")
             else:
                 ax.plot(xs, cumul_fracs, label="Predicted fraction")
-                fig.suptitle("By-segment predicted deuterated fractions", \
-                             fontsize=16)
-            ax.legend()
-            return fig
-
-        def _plot_all_seg_curves(cumul_fracs, seglist, times, overlay_fracs=None):
-            fig = plt.figure(figsize=(11,8.5)) # Letter
-            ax = fig.gca()
-            xs = range(1,len(seglist)+1)
-            labels = [ str(i[0])+"-"+str(i[1]) for i in seglist ]
-            ax.set_title("All timepoints (times in min)", fontsize=12)
-            ax.set_xticks(xs)
-            ax.set_xticklabels(labels, rotation='vertical')
-            ax.set_ylabel("Deuterated fraction")
-            ax.set_xlabel("Peptide segment")
-            ax.set_ylim(0.0, 1.0)
-
-            for timeidx, t in enumerate(times):
-                if overlay_fracs is not None:
-                    predline = ax.plot(xs, cumul_fracs[:,timeidx], \
-                                       label="Predicted @ time %s, R = %3.2f" \
-                                       % (t, self.results.correls[timeidx]))
-                    ax.plot(xs, overlay_fracs[:, timeidx], \
-                            label="Experimental @ time %s" % t, linestyle='--', \
-                            color=predline[0].get_color(), linewidth=1, alpha=0.5)
-                    fig.suptitle("By-segment predicted & experimental deuterated fractions", \
-                                 fontsize=16)
-                else:
-                    ax.plot(xs, cumul_fracs[:, timeidx], label="Predicted @ time %s" % t)
-                    fig.suptitle("By-segment predicted deuterated fractions", \
-                                 fontsize=16)
-            ax.legend()
-            return fig
-                    
-        with PdfPages("seg_curves.pdf") as pdf:
-            # Single timepoint plots
-            for timeidx, t in enumerate(self.results.params['times']):
-                if self.avail['_expt_overlay']:
-                    currfig = _plot_seg_curve(self.results.c_segfracs[-1,:,timeidx], \
-                                              self.results.segres, t, self.results.expfracs[:,timeidx])
-                else:
-                    currfig = _plot_seg_curve(self.results.c_segfracs[-1,:,timeidx], \
-                                              self.results.segres, t)
-                pdf.savefig(currfig)
-                plt.close()
-            # All timepoint plot
-            if self.avail['_expt_overlay']:
-                currfig = _plot_all_seg_curves(self.results.c_segfracs[-1], self.results.segres, \
-                                     self.results.params['times'], overlay_fracs=self.results.expfracs)
-            else:
-                currfig = _plot_all_seg_curves(self.results.c_segfracs[-1], self.results.segres, \
-                                     self.results.params['times'])
-            pdf.savefig(currfig)
-            plt.close()
-
-
-    def seg_range(self):
-        """Plot by-segment deuterated fractions at a given timepoint, with
-           shaded standard deviation of by-segment fractions from block averages.
-           
-           Plots are saved to a multi-page PDF file seg_range.pdf, with one
-           timepoint per page.""" 
-
-        def _plot_seg_curve(cumul_fracs, seglist, blocksize, time, ax):
-            xs = range(1,len(seglist)+1)
-            labels = [ str(i[0])+"-"+str(i[1]) for i in seglist ]
-            ax.set_title("Time = %s min, block size = %d" % (time, blocksize), fontsize=12)
-            ax.set_xticks(xs)
-            ax.set_xticklabels(labels, rotation='vertical')
-            ax.set_ylabel("Deuterated fraction")
-            ax.set_xlabel("Peptide segment")
-            ax.set_ylim(0.0, 1.0)
-
-            ax.plot(xs, cumul_fracs, label="Final predicted fraction")
+#                fig.suptitle("By-segment predicted deuterated fractions", \
+#                             fontsize=16)
+                fig.suptitle("By-segment predicted deuterated fractions")
             return ax
 
-        def _fill_seg_range(seg_fracs, seglist, ax, cumul_fracs=None):
+        def _fill_seg_range(ax, seg_fracs, seglist, cumul_fracs=None):
             xs = range(1,len(seglist)+1)
             segmaxs, segmins = np.zeros(seg_fracs.shape[1]), np.zeros(seg_fracs.shape[1])
 #            for segidx in range(len(segmaxs)):
@@ -642,22 +628,56 @@ class Plots():
             ax.fill_between(xs, segmaxs, segmins, color='gray', alpha=0.3, label="Std. Dev. across trajectory blocks")
             return ax
 
-        with PdfPages("seg_range.pdf") as pdf:
-            for timeidx, currtime in enumerate(self.results.params['times']):
+        def _plot_all_seg_curves(cumul_fracs, seglist, times):
+            fig = plt.figure(figsize=(11,8.5)) # Letter
+            ax = fig.gca()
+            xs = range(1,len(seglist)+1)
+            labels = [ str(i[0])+"-"+str(i[1]) for i in seglist ]
+#            ax.set_title("All timepoints (times in min)", fontsize=12)
+            ax.set_title("All timepoints (times in min)")
+            ax.set_xticks(xs)
+            ax.set_xticklabels(labels, rotation='vertical')
+            ax.set_ylabel("Deuterated fraction")
+            ax.set_xlabel("Peptide segment")
+            ax.set_ylim(0.0, 1.0)
+
+            for timeidx, t in enumerate(times):
+                    ax.plot(xs, cumul_fracs[:, timeidx], label="Predicted @ time %s" % t)
+#                    fig.suptitle("By-segment predicted deuterated fractions", \
+#                                 fontsize=16)
+                    fig.suptitle("By-segment predicted deuterated fractions")
+            ax.legend()
+            fig.tight_layout(rect=[0,0,1,0.95])
+            return fig
+                    
+        with PdfPages("seg_curves.pdf") as pdf:
+            # Single timepoint plots
+            for timeidx, t in enumerate(self.results.params['times']):
                 fig = plt.figure(figsize=(11, 8.5))
                 ax1 = fig.gca()
-                fig.suptitle("Variation in by-segment predicted deuterated fractions across trajectory", \
-                             fontsize=16)
-                ax1 = _plot_seg_curve(self.results.c_segfracs[-1,:,timeidx], self.results.segres, \
-                                      self.results.n_frames[0], \
-                                      currtime, ax1)
-#                ax1 = _fill_seg_range(self.results.segfracs[:,:,timeidx], self.results.segres, ax1)
-                 # Optional +/- std.dev
-                ax1 = _fill_seg_range(self.results.segfracs[:,:,timeidx], self.results.segres, ax1, \
-                                      self.results.c_segfracs[-1,:,timeidx])
+                if self.avail['_expt_overlay']:
+                    fig.suptitle("By-segment predicted & experimental deuterated fractions")
+                    ax1 = _plot_seg_curve(ax1, self.results.c_segfracs[-1,:,timeidx], self.results.segres, \
+                                          self.results.n_frames[0], t, self.results.expfracs[:,timeidx])
+                    # +/- std.dev
+                    ax1 = _fill_seg_range(ax1, self.results.segfracs[:,:,timeidx], self.results.segres, \
+                                          self.results.c_segfracs[-1,:,timeidx])
+                else:
+                    fig.suptitle("By-segment predicted deuterated fractions")
+                    ax1 = _plot_seg_curve(ax1, self.results.c_segfracs[-1,:,timeidx], self.results.segres, \
+                                          self.results.n_frames[0], t, self.results.expfracs[:,timeidx])
+                    ax1 = _fill_seg_range(ax1, self.results.segfracs[:,:,timeidx], self.results.segres, \
+                                          self.results.c_segfracs[-1,:,timeidx])
                 ax1.legend()
+                fig.tight_layout(rect=[0,0,1,0.95])
                 pdf.savefig(fig)
                 plt.close()
+            # All timepoint plot, no expt.
+            currfig = _plot_all_seg_curves(self.results.c_segfracs[-1], self.results.segres, \
+                                           self.results.params['times'])
+            pdf.savefig(currfig)
+            plt.close()
+
             
     def pf_byres(self):
         """Plot by-residue protection factors averaged over all frames,
@@ -677,10 +697,12 @@ class Plots():
             xticknums.extend(intermedx)
             xticknums.append(final)
             ax.plot(xs, self.results.c_pfs[-1], linewidth=1)
-            ax.set_title("Mean by-residue protection factors", fontsize=16)
+#            ax.set_title("Mean by-residue protection factors", fontsize=16)
+            ax.set_title("Mean by-residue protection factors")
             ax.set_ylabel("Protection factor")
             ax.set_xlabel("Residue")
             ax.set_xticks(xticknums)
+            fig.tight_layout() # No fig.suptitle = default figure coords
             pdf.savefig(fig)
             plt.close()
 
@@ -694,11 +716,15 @@ class Plots():
                                                   # skipping last label if it's within 25 of the previous
             xticknums.extend(intermedx)
             xticknums.append(final)
-            ax.plot(xs, np.log10(self.results.c_pfs[-1]), linewidth=1)
-            ax.set_title("Log of mean by-residue protection factors", fontsize=16)
-            ax.set_ylabel(r'$log_{10}$(Protection factor)')
+#            ax.plot(xs, np.log10(self.results.c_pfs[-1]), linewidth=1)
+            ax.plot(xs, self.results.c_pfs[-1], linewidth=1)
+            ax.set_yscale('log')
+#            ax.set_title("Mean by-residue protection factors (log-scaled)", fontsize=16)
+            ax.set_title("Mean by-residue protection factors (log-scaled)")
+            ax.set_ylabel('Protection factor (log-scaled)')
             ax.set_xlabel("Residue")
             ax.set_xticks(xticknums)
+            fig.tight_layout() # No fig.suptitle = default figure coords
             pdf.savefig(fig)
             plt.close()
 
@@ -720,29 +746,40 @@ class Plots():
             fig = plt.figure(figsize=(11, 8.5)) # Letter
             ax = fig.gca()
             xs = self.results.c_n_frames
-            ax.scatter(xs, np.sum(self.results.pfs, axis=1), label="Block protection factor", marker='x')
+            ax.scatter(xs, np.sum(self.results.pfs, axis=1), label="Block protection factor", marker='o')
             ax.plot(xs, np.sum(self.results.c_pfs, axis=1), label="Running average")
-            ax.set_title("Total protection factors across trajectory", fontsize=16)
+#            ax.set_title("Total protection factors across trajectory", fontsize=16)
+            ax.set_title("Total protection factors across trajectory")
             ax.set_ylabel("Protection factor")
             ax.set_xlabel("Trajectory frame")
             ax.set_xlim(0, self.results.c_n_frames[-1] * 1.05)
             ax.set_ylim(_get_ylim(np.min(np.sum(self.results.pfs, axis=1)), np.max(np.sum(self.results.pfs, axis=1)))) 
+            final = xs[-1]
+            blocksize = self.results.n_frames[0]
+            xticknums = range(0, int(final) - (blocksize / 2 +1), blocksize) # Tick labels at block intervals
+                                                                             # skipping last label if it's within 1/2 of previous
+            ax.set_xticks(xticknums)
             ax.legend()
+            fig.tight_layout() # No fig.suptitle = default figure coords
             pdf.savefig(fig)
             plt.close()
+
             # Log PFs
             fig = plt.figure(figsize=(11, 8.5)) # Letter
             ax = fig.gca()
             xs = self.results.c_n_frames
-            ax.scatter(xs, np.log10(np.sum(self.results.pfs, axis=1)), label="Block protection factor", marker='x')
+            ax.scatter(xs, np.log10(np.sum(self.results.pfs, axis=1)), label="Block protection factor", marker='o')
             ax.plot(xs, np.log10(np.sum(self.results.c_pfs, axis=1)), label="Running average")
-            ax.set_title("Log of total protection factors across trajectory", fontsize=16)
+#            ax.set_title("Log of total protection factors across trajectory", fontsize=16)
+            ax.set_title("Log of total protection factors across trajectory")
             ax.set_ylabel(r'$log_{10}$(Protection factor)')
             ax.set_xlabel("Trajectory frame")
             ax.set_xlim(0, self.results.c_n_frames[-1] * 1.05)
             ax.set_ylim(np.floor(np.log10(np.max(np.sum(self.results.pfs, axis=1)))), \
                         np.ceil(np.log10(np.max(np.sum(self.results.pfs, axis=1))))) 
+            ax.set_xticks(xticknums)
             ax.legend()
+            fig.tight_layout() # No fig.suptitle = default figure coords
             pdf.savefig(fig)
             plt.close()
         
