@@ -122,9 +122,14 @@ class Radou():
         if isinstance(other, Radou):
             try:
                 if np.array_equal(self.rates, other.rates):
-                    self.pfs = (self.n_frames * self.pfs) + (other.n_frames * other.pfs)
+                    self.pfs[:,0] = (self.n_frames * self.pfs[:,0]) + (other.n_frames * other.pfs[:,0])
+                    # SD = sqrt((a^2 * var(A)) + (b^2 * var(B)))
+                    self.pfs[:,1] = np.sqrt((self.n_frames**2 * self.pfs[:,1]**2) + (other.n_frames**2 * other.pfs[:,1]**2))
                     self.n_frames += other.n_frames
-                    self.pfs /= self.n_frames
+                    self.pfs[:,0] /= self.n_frames
+                    # SD = sd(A)/a
+                    self.pfs[:,1] /= self.n_frames
+                    self.pf_byframe = np.concatenate((self.pf_byframe, other.pf_byframe), axis=1)
                     self.resfracs = self.dfrac(write=False)
                     return self
                 else:
@@ -288,7 +293,10 @@ class Radou():
 
            Usage: PF()
        
-           Returns: (array of residue indices, array of mean protection factors)"""
+           Returns: (array of residue indices,
+                     array of mean protection factors & standard deviations thereof,
+                     array of by-frame protection factors for each residue)"""
+
         # Setup residue/atom lists        
         hn_atms = Functions.extract_HN(self.t, log=self.params['logfile'])
         prolines = Functions.list_prolines(self.t, log=self.params['logfile'])
@@ -312,20 +320,22 @@ class Radou():
         hbonds *= self.params['betah']     # Beta parameter 1
         contacts *= self.params['betac']   # Beta parameter 2
     
-        pf = np.exp(hbonds + contacts)
-        pf = np.mean(pf, axis=1)
+        pf_byframe = np.exp(hbonds + contacts)
+        pf_bar = np.mean(pf_byframe, axis=1)
+        pf_bar = np.stack((pf_bar, np.std(pf_byframe, axis=1, ddof=1)), axis=1)
         rids = np.asarray([ self.top.residue(i).resSeq for i in hres ])
+        rids = np.reshape(rids, (len(rids), 1))
         # Save PFs to separate log file, appending filenames for trajectories read as chunks
         if os.path.exists(self.params['outprefix']+"Protection_factors.dat"):
             filenum = len(glob.glob(self.params['outprefix']+"Protection_factors*"))
             np.savetxt(self.params['outprefix']+"Protection_factors_chunk_%d.dat" % (filenum+1), \
-                       np.stack((rids, pf), axis=1), fmt=['%7d','%18.8f'], \
-                       header="ResID  Protection factor") # Use residue indices internally, print out IDs
+                       np.concatenate((rids, pf_bar), axis=1), fmt=['%7d', '%18.8f', '%18.8f'], \
+                       header="ResID  Protection factor Std. Dev.") # Use residue indices internally, print out IDs
         else:    
-            np.savetxt(self.params['outprefix']+"Protection_factors.dat", np.stack((rids, pf), axis=1), \
-                       fmt=['%7d','%18.8f'], header="ResID  Protection factor") # Use residue indices internally, print out IDs
+            np.savetxt(self.params['outprefix']+"Protection_factors.dat", np.concatenate((rids, pf_bar), axis=1), \
+                       fmt=['%7d', '%18.8f', '%18.8f'], header="ResID  Protection factor Std. Dev.") # Use residue indices internally, print out IDs
 
-        return hres, pf
+        return hres, pf_bar, pf_byframe
 
     def pro_omega_indices(self, prolines):
         """Calculates omega dihedrals (CA-C-N-CA) for all proline
@@ -599,42 +609,58 @@ class Radou():
         return kints
 
     # Deuterated fration by residue
-    def dfrac(self, write=True):
+    def dfrac(self, write=True, use_self=True, alternate_pfs=None):
         """Function for calculating by-residue deuterated fractions, for
            a set of Protection factors, intrinsic rates, and exposure times
-           previously defined for the current Radou object.
+           previously defined for the current Radou object. Optionally write
+           out results.
 
-           Usage: dfrac()
+           Alternatively, if use_self=False, take an alternative set of PFs
+           not assigned to the current object and perform the same calculation
+           on them.
+
+           Usage: dfrac([write=True, use_self=True, alternate_pfs=None])
            Returns: [n_residues, n_times] 2D numpy array of deuterated fractions"""
 
-
-        if len(set(map(len,[self.reslist, self.pfs, self.rates]))) != 1: # Check that all lengths are the same (set length = 1)
-            raise Functions.HDX_Error("Can't calculate deuterated fractions, your residue/protection factor/rates arrays are not the same length.")
+        if use_self:
+            curr_pfs = self.pfs
+            if len(set(map(len,[self.reslist, self.pfs, self.rates]))) != 1: # Check that all lengths are the same (set length = 1)
+                raise Functions.HDX_Error("Can't calculate deuterated fractions, your residue/protection factor/rates arrays are not the same length.")
+        else:
+            curr_pfs = alternate_pfs
+            if len(set(map(len,[self.reslist, alternate_pfs, self.rates]))) != 1: # Check that all lengths are the same (set length = 1)
+                raise Functions.HDX_Error("Can't calculate deuterated fractions, your provided residue/protection factor/rates arrays are not the same length.")
 
         try:
-            fracs = np.zeros((len(self.reslist), len(self.params['times'])))
+            fracs = np.zeros((len(self.reslist), len(self.params['times']), 2))
         except TypeError:
-            fracs = np.zeros((len(self.reslist), 1))
+            fracs = np.zeros((len(self.reslist), 1, 2))
         for i2, t in enumerate(self.params['times']):
             def _residue_fraction(pf, k, time=t):
-                return 1 - np.exp(-k / pf * time)
-            for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, self.pfs, self.rates)):
-                fracs[i1,i2] = curr_frac
+                f = np.exp(-k / pf[0] * time)
+                val = 1 - f
+                err = (pf[1]/pf[0]) * k/pf[0] # sd(bA^-1) = rel_sd(A) * A^-1 * b
+                err = f * err * time          # sd(e^Aa) = f * sd(A) * a 
+                return np.asarray([val, err])
+            for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, curr_pfs, self.rates)):
+                fracs[i1,i2,:] = curr_frac
 
         rids = np.asarray([ self.top.residue(i).resSeq for i in self.reslist ])
+        rids = np.reshape(rids, (len(self.reslist),1))
         # Write resfracs to separate file, appending filenames for trajectories read as chunks
+        outfracs = np.reshape(fracs.flatten(), (fracs.shape[0], fracs.shape[1] * fracs.shape[2])) # Reshape as 'Time Err Time Err...' 
         if write:
             if os.path.exists(self.params['outprefix']+"Residue_fractions.dat"):
                 filenum = len(glob.glob(self.params['outprefix']+"Residue_fractions*"))
                 np.savetxt(self.params['outprefix']+"Residue_fractions_chunk_%d.dat" % (filenum+1), \
-                           np.hstack((np.reshape(rids, (len(self.reslist),1)), fracs)), \
-                           fmt='%7d ' + '%8.5f '*len(self.params['times']), \
-                           header="ResID  Deuterated fraction, Times / min: %s" \
+                           np.concatenate((rids, outfracs), axis=1), \
+                           fmt='%7d ' + '%8.5f '*len(self.params['times']*2), \
+                           header="ResID  Deuterated fraction, Times, std. dev / min : %s" \
                            % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
             else:    
                 np.savetxt(self.params['outprefix']+"Residue_fractions.dat", \
-                           np.hstack((np.reshape(rids, (len(self.reslist),1)), fracs)), \
-                           fmt='%7d ' + '%8.5f '*len(self.params['times']), \
+                           np.concatenate((rids, outfracs), axis=1), \
+                           fmt='%7d ' + '%8.5f '*len(self.params['times']*2), \
                            header="ResID  Deuterated fraction, Times / min: %s" \
                            % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
         return fracs
@@ -651,7 +677,7 @@ class Radou():
         self.assign_disulfide()
         self.assign_his_protonation()
         self.assign_termini()
-        self.reslist, self.pfs = self.PF()
+        self.reslist, self.pfs, self.pf_byframe = self.PF()
                                    
         self.rates = self.kint()
         self.resfracs = self.dfrac()

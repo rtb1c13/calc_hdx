@@ -7,13 +7,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os, glob, copy, itertools
 from scipy.stats import pearsonr as correl
+from scipy.stats import sem as stderr
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.ticker import MultipleLocator, MaxNLocator
 from cycler import cycler
 
 ### Define defaults for matplotlib plots
 plt.rc('lines', linewidth=1.5, markersize=4)
-plt.rc('axes', prop_cycle=(cycler('color', ['k','b','r','g','c','m','y','orange'])), # Color cycle defaults to black
-#       spines.top=False, spines.right=False, # Switch off top/right axes
+plt.rc('axes', prop_cycle=(cycler('color', ['k','b','r','orange','c','m','y','g'])), # Color cycle defaults to black
        labelweight='heavy', labelsize=14, titlesize=18) # Default fontsizes for printing
 plt.rc('axes.spines', top=False, right=False) # Switch off top/right axes
 plt.rc('legend', fontsize=10) # Default fontsizes for printing
@@ -29,12 +30,16 @@ class Analyze():
     def __init__(self, resobj, top, **extra_params):
         """Initialises Analyze object from a Method object with by-residue results"""
         try:
-            self.reslist = resobj.reslist
+            self.residxs = resobj.reslist
+            self.resobj = resobj
+            # Analysis ignores errors so far
             # Cumulative resfracs = 3D-array[chunk, resfrac, time]
-            self.resfracs = np.reshape(resobj.resfracs, (1, len(resobj.resfracs), len(resobj.resfracs[0])))
+            self.resfracs = np.reshape(resobj.resfracs[:,:,0], (1, len(resobj.resfracs), len(resobj.resfracs[0])))
             self.c_resfracs = np.copy(self.resfracs)
+            # Byframe PFs = 2D-array[residue, PFs]
+            self.pf_byframe = np.copy(resobj.pf_byframe)
             # Cumulative PFs = 2D-array[chunk, PFs]
-            self.pfs = np.reshape(resobj.pfs, (1, len(resobj.pfs)))
+            self.pfs = np.reshape(resobj.pfs[:,0], (1, len(resobj.pfs)))
             self.c_pfs = np.copy(self.pfs)
             # Cumulative n_frames = 1D-array[n_frames]
             self.n_frames = np.atleast_1d(resobj.t.n_frames)
@@ -42,6 +47,7 @@ class Analyze():
             # Topology & rates
             self.rates = resobj.rates
             self.top = top
+            self.resnums = np.asarray([ self.top.residue(i).resSeq for i in self.residxs ])
         except AttributeError:
             raise Functions.HDX_Error("Error when copying results from prediction to analysis objects - have you made any HDX predictions yet?")
         self.params = resobj.params
@@ -58,15 +64,16 @@ class Analyze():
 
         if isinstance(other, Analyze):
 #            try:
-                if not all((np.array_equal(self.reslist, other.reslist), np.array_equal(self.rates, other.rates))):
+                if not all((np.array_equal(self.residxs, other.residxs), np.array_equal(self.rates, other.rates))):
                     print("Reslist or rates of added Analyze objects differ. Not adding them!")
                     return self
                 new = copy.deepcopy(self)
-                # Append n_frames
+                # Add n_frames
                 new.n_frames = np.append(new.n_frames, other.n_frames)
                 new.c_n_frames = np.cumsum(new.n_frames)
                 
                 # Calc running ave of PFs = 2D-array[chunk, PFs]
+                new.pf_byframe = np.concatenate((new.pf_byframe, other.pf_byframe), axis=1)
                 new.pfs = np.concatenate((new.pfs, other.pfs), axis=0)
                 _ = np.copy(new.pfs)
                 for frames, curr_pf in zip(new.n_frames, _):
@@ -86,7 +93,7 @@ class Analyze():
                     for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, new.c_pfs[-1], new.rates)):
                         _[i1,i2] = curr_frac
                 new.c_resfracs = np.concatenate((new.c_resfracs, \
-                                                 np.reshape(_, (1, len(new.reslist), len(new.params['times'])))), \
+                                                 np.reshape(_, (1, len(new.residxs), len(new.params['times'])))), \
                                                  axis=0)
 
                 return new
@@ -95,6 +102,34 @@ class Analyze():
 #                raise Functions.HDX_Error("Error when adding analysis objects - have you made any HDX predictions yet?")
         else:
             return self
+
+
+    def _windowed_average(self, data, window):
+        """Calculate average of non-overlapping windows (size=window) of a set of data.
+
+           Usage: _windowed_average(data, window)"""
+
+        blocks = len(data)/window
+        aves = []
+        for start_i in range(int(blocks)):        
+            aves.append(np.mean(data[(start_i * window):(start_i * window) + window]))
+        return np.asarray(aves)
+
+
+    def _cumulative_average(self, data, blocksizes):
+        """Calculate cumulative averages of a set of data at provided intervals
+           Data & blocksizes should be 1D arrays (or axis-slices of larger arrays)
+           
+           Usage: _cumulative_average(data, blocksizes)"""
+        if not len(data) == np.sum(blocksizes):
+            raise Functions.HDX_Error("Unable to cumulatively average data of length %d using total blocksizes %d"\
+                                      % (len(data), int(np.sum(blocksizes))))
+        aves = np.zeros(len(blocksizes))
+        blocksum = np.cumsum(blocksizes)
+        for i, block in enumerate(blocksum):
+            aves[i] = np.mean(data[:block])
+        return aves
+
 
     def read_segfile(self):
 
@@ -106,6 +141,7 @@ class Analyze():
         except ValueError:
             raise Functions.HDX_Error("There's a problem reading the values in your segments file: %s \n"
                                       "File should contain 2 columns of integers, separated by spaces.")
+
 
     def read_expfile(self):
         """Reads an experimental data file for comparison to predicted data.
@@ -150,7 +186,7 @@ class Analyze():
            Writes info on skipped residues to logfile "HDX_analysis.log" by default
            and the segment/average deuteration information to "Segment_average_fractions.dat"
 
-           Usage: segments(traj, reslist, fracs, segfile_name, times, [ log="HDX_analysis.log" ])
+           Usage: segments(traj, residxs, fracs, segfile_name, times, [ log="HDX_analysis.log" ])
            Returns: [n_segs, 2] 2D numpy array of segment start/end residue IDs, 
                 [n_segs, n_times] 2D numpy array of segment deuterated fractions at each timepoint"""
 
@@ -169,9 +205,11 @@ class Analyze():
         self.read_segfile()
         try:
             aves = np.zeros((len(self.resfracs), len(self.segres), len(self.params['times'])))
+            stddevs = np.zeros((len(self.resfracs), len(self.segres), len(self.params['times'])))
             c_aves = np.zeros((len(self.c_resfracs), len(self.segres), len(self.params['times'])))
         except TypeError:
             aves = np.zeros((len(self.resfracs), len(self.segres), 1))
+            stddevs = np.zeros((len(self.resfracs), len(self.segres), 1))
             c_aves = np.zeros((len(self.c_resfracs), len(self.segres), 1))
             self.params['times'] = [self.params['times']]    
 
@@ -188,7 +226,7 @@ class Analyze():
                             % (top.residue(res2idx[s[0]]), s[0], s[1]))
 
         # Calc average fractions for each chunk                    
-        for i0, chunk in enumerate(self.resfracs):
+        for i0, chunk, errchunk in zip(range(len(self.resfracs)), self.resfracs, self.resfrac_STDs):
             for i2, t in enumerate(self.params['times']):
                 for i1, s in enumerate(self.segres):
                     try:
@@ -207,11 +245,16 @@ class Analyze():
                         end = top.residue(-1).index
     
                     if self.params['skip_first']:
-                        idxs = np.where(np.logical_and( self.reslist > start, self.reslist <= end ))[0] # > start skips
+                        idxs = np.where(np.logical_and( self.residxs > start, self.residxs <= end ))[0] # > start skips
                     else:
-                        idxs = np.where(np.logical_and( self.reslist >= start, self.reslist <= end ))[0] # >= start incs
+                        idxs = np.where(np.logical_and( self.residxs >= start, self.residxs <= end ))[0] # >= start incs
 
                     aves[i0, i1, i2] = np.mean(chunk[idxs, i2])
+                    stddevs[i0, i1, i2] = np.sqrt(np.sum(errchunk[idxs, i2]**2)) / len(np.nonzero(idxs))
+
+        stderrs = np.copy(stddevs)
+        for i0, a in enumerate(stderrs):
+            a /= np.sqrt(self.n_frames[i0])
 
         # Do the same for cumulative resfracs
         for i0, cchunk in enumerate(self.c_resfracs):
@@ -235,9 +278,9 @@ class Analyze():
                         end = top.residue(-1).index
     
                     if self.params['skip_first']:
-                        idxs = np.where(np.logical_and( self.reslist > start, self.reslist <= end ))[0] # > start skips
+                        idxs = np.where(np.logical_and( self.residxs > start, self.residxs <= end ))[0] # > start skips
                     else:
-                        idxs = np.where(np.logical_and( self.reslist >= start, self.reslist <= end ))[0] # >= start incs
+                        idxs = np.where(np.logical_and( self.residxs >= start, self.residxs <= end ))[0] # >= start incs
 
                     c_aves[i0, i1, i2] = np.mean(cchunk[idxs, i2])
                     
@@ -260,7 +303,63 @@ class Analyze():
         with open(self.params['logfile'], 'a') as f:
             f.write("Segment averaging complete.\n")
 
-        return aves, c_aves
+        return aves, c_aves, stddevs, stderrs
+
+
+    def check_blocksize(self):
+        """Evaluate convergence of standard error in the mean for PFs.
+
+           By-frame PFs are successively block averaged at every possible
+           block size (1 -> n_frames-1), the SEM calculated across block
+           averages, and saved to self.tot_SEMs"""
+
+#        self.tot_SEMs = np.zeros((len(self.pf_byframe)-1, 2), dtype=[np.int32, np.float64])
+#       Array(window, SEM)
+        valid_windows = []
+        for window in xrange(1, int((self.c_n_frames[-1] / 2)) + 1):
+            if self.c_n_frames[-1] % window == 0:
+                valid_windows.append(window)
+        with open(self.params['logfile'], 'a') as f:
+            f.write("Total frames divisible by: %s,\nEvaluating standard error in total PF at these windows.\n"\
+                    % " ".join([ str(i) for i in valid_windows ]))
+        valid_windows = np.asarray(valid_windows, dtype=np.int32)
+        self.tot_SEMs = np.zeros((len(valid_windows), 2))
+        for i, window in enumerate(valid_windows):
+            self.tot_SEMs[i, 0] = window
+            self.tot_SEMs[i, 1] = stderr(self._windowed_average(np.sum(self.pf_byframe, axis=0), window))
+        self.norm_tot_SEMs = np.copy(self.tot_SEMs) 
+        self.norm_tot_SEMs[:,1] /= np.max(self.tot_SEMs[:,1]) # Normalised to max
+
+#       Array(res, window, SEM)
+        self.res_SEMs = np.zeros((len(self.resnums), len(valid_windows), 2))
+        self.res_STDs = np.zeros((len(self.resnums), len(valid_windows), 2))
+        for j, res in enumerate(self.resnums):
+            for i, window in enumerate(valid_windows):
+                self.res_SEMs[j,i,0] = window
+                self.res_SEMs[j,i,1] = stderr(self._windowed_average(self.pf_byframe[j], window))
+                self.res_STDs[j,i,1] = np.std(self._windowed_average(self.pf_byframe[j], window), ddof=1)
+        self.norm_res_SEMs = np.copy(self.res_SEMs)
+        for res in self.norm_res_SEMs:
+            res[:,1] /= np.max(res[:,1]) # Normalised to max
+
+
+    def propagate_errors(self):
+        """Propagate errors for individual blocks. Save as std errors for PFs, resfracs & segfracs"""
+
+        self.pf_stds = np.zeros(self.pfs.shape)
+        self.pf_SEMs = np.zeros(self.pfs.shape)
+        startframe = 0        
+        for i, endframe in enumerate(self.c_n_frames):
+            self.pf_stds[i] = np.std(self.pf_byframe[:,startframe:endframe], axis=1, ddof=1)
+            self.pf_SEMs[i] = stderr(self.pf_byframe[:,startframe:endframe], axis=1)
+            startframe += self.n_frames[i]
+        
+        self.resfrac_STDs = np.zeros(self.resfracs.shape)
+        self.resfrac_SEMs = np.zeros(self.resfracs.shape)
+        for i in range(self.pfs.shape[0]):
+            self.resfrac_STDs[i] = self.resobj.dfrac(write=False, use_self=False, alternate_pfs=np.stack((self.pfs[i], self.pf_stds[i]), axis=1))[:,:,1]
+            denom = np.sqrt(self.n_frames[i])
+            self.resfrac_SEMs[i] = self.resfrac_STDs[i] / denom  
 
 
     def desc_stats(self):
@@ -289,14 +388,13 @@ class Analyze():
         
         # Save PFs to 'SUMMARY' file
         try:
-            rids = np.asarray([ self.top.residue(i).resSeq for i in self.reslist ])
             if os.path.exists(self.params['outprefix']+"SUMMARY_protection_factors.dat"):
                 filenum = len(glob.glob(self.params['outprefix']+"SUMMARY_protection_factors*"))
                 np.savetxt(self.params['outprefix']+"SUMMARY_protection_factors_%d.dat" % (filenum+1), \
-                           np.stack((rids, self.c_pfs[-1]), axis=1), fmt=['%7d','%18.8f'], \
+                           np.stack((self.resnums, self.c_pfs[-1]), axis=1), fmt=['%7d','%18.8f'], \
                            header="ResID  Protection factor") # Use residue indices internally, print out IDs
             else:    
-                np.savetxt(self.params['outprefix']+"SUMMARY_protection_factors.dat", np.stack((rids, self.c_pfs[-1]), axis=1), \
+                np.savetxt(self.params['outprefix']+"SUMMARY_protection_factors.dat", np.stack((self.resnums, self.c_pfs[-1]), axis=1), \
                            fmt=['%7d','%18.8f'], header="ResID  Protection factor") # Use residue indices internally, print out IDs
         except AttributeError:
             raise Functions.HDX_Error("Can't write summary protection factors - perhaps you haven't calculated them yet?")
@@ -306,13 +404,13 @@ class Analyze():
             if os.path.exists(self.params['outprefix']+"SUMMARY_residue_fractions.dat"):
                 filenum = len(glob.glob(self.params['outprefix']+"SUMMARY_residue_fractions*"))
                 np.savetxt(self.params['outprefix']+"SUMMARY_residue_fractions_%d.dat" % (filenum+1), \
-                           np.concatenate((np.reshape(rids, (len(self.reslist),1)), self.c_resfracs[-1]), axis=1), \
+                           np.concatenate((np.reshape(self.resnums, (len(self.residxs),1)), self.c_resfracs[-1]), axis=1), \
                            fmt='%7d ' + '%8.5f '*len(self.params['times']), \
                            header="ResID  Deuterated fraction, Times / min: %s" \
                            % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
             else:    
                 np.savetxt(self.params['outprefix']+"SUMMARY_residue_fractions.dat", \
-                           np.concatenate((np.reshape(rids, (len(self.reslist),1)), self.c_resfracs[-1]), axis=1), \
+                           np.concatenate((np.reshape(self.resnums, (len(self.residxs),1)), self.c_resfracs[-1]), axis=1), \
                            fmt='%7d ' + '%8.5f '*len(self.params['times']), \
                            header="ResID  Deuterated fraction, Times / min: %s" \
                            % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
@@ -342,7 +440,9 @@ class Analyze():
         """Runs a by-segment HDX prediction and optionally graphs results"""
 
         self.read_segfile()
-        self.segfracs, self.c_segfracs = self.segments(self.top)
+        self.check_blocksize()
+        self.propagate_errors()
+        self.segfracs, self.c_segfracs, self.seg_STDs, self.seg_SEMs = self.segments(self.top)
         if self.params['expfile'] is not None:
             self.read_expfile()
             self.desc_stats()
@@ -365,32 +465,31 @@ class Plots():
            data, but switch can be overriden by providing kwargs.
 
            Available plots:
-           df_curve : By-segment deuterated fractions for all timepoints
+           df_curves : By-segment deuterated fractions for all timepoints
            df_convergence : Convergence of by-segment deuterated fractions across all simulation chunks
-           seg_curve : By-segment predictions across all timepoints
-           seg_convergence : Convergence of by-segment predictions across all timepoints
-           pf_curve : By-residue protection factors
+           seg_curves : By-segment predictions across all timepoints
+           pf_byres : By-residue protection factors
            tot_pf   : Convergence of total protection factor across all simulation chunks
            _expt_overlay : Option to switch on/off overlay of experimental values on all relevant plots
-           _block_ave : Option to switch on/off block averaging plots as well as convergence (running ave)
+           _block_ave : Option to switch on/off block averaging plots as well as convergence (running ave) (currently unused)
 
            Sets Plots.avail attribute with dictionary of results."""
 
         self.avail = { 'df_curve' : False,
                        'df_convergence' : False,
                        'seg_curve' : False,
-#                       'seg_range' : False,
                        'pf_byres' : False,
                        'tot_pf' : False,
+                       'pf_error' : False,
                        '_expt_overlay' : False,
                        '_block_ave' : False } # Currently unused
 
         self._funcdict = { 'df_curve' : self.df_curve,
                            'df_convergence' : self.df_convergence,
                            'seg_curve' : self.seg_curve,
-#                           'seg_range' : self.seg_range,
                            'pf_byres' : self.pf_byres,
-                           'tot_pf' : self.tot_pf }
+                           'tot_pf' : self.tot_pf,
+                           'pf_error' : self.pf_error }
         try:
             self.results.c_resfracs[-1]
             self.avail['df_curve'] = True
@@ -401,14 +500,14 @@ class Plots():
         try:
             self.results.c_segfracs[-1]
             self.avail['seg_curve'] = True
-#            if len(self.results.c_segfracs) > 1:
-#                self.avail['seg_range'] = True
         except (AttributeError, IndexError):
             pass
         try:
-            self.avail['pf_byres'] = ( len(self.results.c_pfs[-1]) == len(self.results.reslist) )
+            self.avail['pf_byres'] = ( len(self.results.c_pfs[-1]) == len(self.results.residxs) )
             if len(self.results.c_pfs) > 1:
                 self.avail['tot_pf'] = True
+            if len(self.results.tot_SEMs) > 1:
+                self.avail['pf_error'] = True
         except (AttributeError, IndexError):
             pass
         try:
@@ -429,6 +528,31 @@ class Plots():
             except (TypeError, ValueError):
                 with open(self.results.params['logfile'], 'a') as f:
                     f.write("Available plots automatically chosen without overrides\n")
+
+
+    def _fix_ticks(self, ticklist, maxdata, interval, mindata=0):
+        """Fix list of tick positions to finish on maxdata and skip
+           penultimate tick if it's closer than interval/2 to maxdata"""
+
+        # Prepend with min        
+        ticklist = filter(lambda x: x >= mindata, ticklist)
+        if ticklist[0] == mindata:
+            pass
+        else:
+            ticklist = np.append(np.asarray([mindata]), ticklist)
+        
+
+        # Append with max
+        ticklist = filter(lambda y: y <= maxdata, ticklist)
+        if ticklist[-1] == maxdata:
+            return ticklist
+        elif maxdata - ticklist[-1] <= interval/2:
+            ticklist[-1] = maxdata
+            return ticklist
+        else:
+            ticklist = np.append(ticklist, maxdata)
+            return ticklist
+
         
     def df_curve(self):
         """Plot a predicted deuteration curve for each segment. Plots are optionally
@@ -438,26 +562,31 @@ class Plots():
            Plots are saved to a multi-page PDF file df_curves.pdf, with up to
            8 segments per page.""" 
 
-        def _plot_df_curve(ax, segdata, overlay_ys=None, **plot_opts):
+        def _plot_df_curve(ax, segdata, blockdata, overlay_ys=None, **plot_opts):
             xs, ys = self.results.params['times'], segdata[2:]
             ax.plot(xs, ys, marker='o', color='black', linewidth=1.5, linestyle='-', label="Predicted", **plot_opts)
+            segmaxs = ys + np.std(blockdata[:,0], axis=0, ddof=1)
+            segmins = ys - np.std(blockdata[:,0], axis=0, ddof=1)
+            ax.fill_between(xs, segmaxs, segmins, color='gray', alpha=0.3, label="Std. Dev. across trajectory blocks")
             ax.set_title("Segment %d-%d" % (segdata[0], segdata[1]), fontsize=9)
             ax.set_xlim(0.0 - xs[-1]*0.05, xs[-1] *1.05) # 5% buffers - do this as log?
-            ax.set_ylim(-0.05, 1.05)
-            final = xs[-1]
-            xticknums = range(0, int(final) - 14, 30) # Residue labels at 30 min intervals
-                                                      # skipping last label if it's within 15 of the previous
-            xticknums.append(final)
+            ax.xaxis.set_major_locator(MultipleLocator(30))
+            xticknums = self._fix_ticks(ax.get_xticks(), xs[-1], 30)
             ax.set_xticks(xticknums)
             ax.set_yticks(np.arange(0.0, 1.2, 0.2))
+            ax.set_xlim(0.0 - xs[-1]*0.05, xs[-1] *1.05) # 5% buffers - do this as log?
+            ax.set_ylim(-0.05, 1.05)
 
             if overlay_ys is not None:
                 ax.plot(xs, overlay_ys, marker='^', color='blue', linewidth=1.5, linestyle=':', label="Experimental")
             ax.legend(fontsize=6)
 
-        def _plot_log_df_curve(ax, segdata, overlay_ys=None, **plot_opts):
+        def _plot_log_df_curve(ax, segdata, blockdata, overlay_ys=None, **plot_opts):
             xs, ys = self.results.params['times'], segdata[2:]
             ax.plot(xs, ys, marker='o', color='black', linewidth=1.5, linestyle='-', label="Predicted", **plot_opts)
+            segmaxs = ys + np.std(blockdata[:,0], axis=0, ddof=1)
+            segmins = ys - np.std(blockdata[:,0], axis=0, ddof=1)
+            ax.fill_between(xs, segmaxs, segmins, color='gray', alpha=0.3, label="Std. Dev. across trajectory blocks")
             ax.set_title("Segment %d-%d" % (segdata[0], segdata[1]), fontsize=9)
             ax.set_ylim(-0.05, 1.05)
             ax.set_xscale('log')
@@ -484,7 +613,6 @@ class Plots():
 
             fig1, axs1 = plt.subplots(ncols=4, nrows=3, sharex=True, \
                                      sharey=True, figsize=(11, 8.5)) # Letter
-#            fig1.suptitle("Deuterated fractions against time", fontsize=18)
             fig1.suptitle("Deuterated fractions against time")
             for ax in axs1[:,0]:
                 ax.set_ylabel("Deuterated fraction", fontsize=12)
@@ -492,32 +620,36 @@ class Plots():
                 ax.set_xlabel("Time / min", fontsize=12)
             axs1 = axs1.flatten()
             if self.avail['_expt_overlay']:
-                for a, predsegs, expt in zip(axs1, \
+                for a, predsegs, sliceidx, expt in zip(axs1, \
                                              np.hstack((self.results.segres, self.results.c_segfracs[-1]))[startslice:endslice+1], \
+                                             range(startslice,endslice+1), \
                                              self.results.expfracs[startslice:endslice+1]):
-                    _plot_df_curve(a, predsegs, overlay_ys=expt)
+                    _plot_df_curve(a, predsegs, self.results.segfracs[:,sliceidx], overlay_ys=expt)
             else:
-                for a, predsegs in zip(axs1, np.hstack((self.results.segres, self.results.c_segfracs[-1]))[startslice:endslice+1]):
-                    _plot_df_curve(a, predsegs)
+                for a, predsegs, sliceidx, in zip(axs1, \
+                                       np.hstack((self.results.segres, self.results.c_segfracs[-1]))[startslice:endslice+1], \
+                                       range(startslice,endslice+1)):
+                    _plot_df_curve(a, predsegs, self.results.segfracs[:,sliceidx])
 
             fig2, axs2 = plt.subplots(ncols=4, nrows=3, sharex=True, \
                                      sharey=True, figsize=(11, 8.5)) # Letter
-#            fig2.suptitle("Deuterated fractions against time (log-scaled)", fontsize=18)
             fig2.suptitle("Deuterated fractions against time (log-scaled)")
             for ax in axs2[:,0]:
                 ax.set_ylabel("Deuterated fraction", fontsize=12)
             for ax in axs2[-1,:]:
-#                ax.set_xlabel("Time / min")
                 ax.set_xlabel("Time / min (log-scaled)", fontsize=12)
             axs2 = axs2.flatten()
             if self.avail['_expt_overlay']:
-                for a, predsegs, expt in zip(axs2, \
+                for a, predsegs, sliceidx, expt in zip(axs2, \
                                              np.hstack((self.results.segres, self.results.c_segfracs[-1]))[startslice:endslice+1], \
+                                             range(startslice,endslice+1), \
                                              self.results.expfracs[startslice:endslice+1]):
-                    _plot_log_df_curve(a, predsegs, overlay_ys=expt)
+                    _plot_log_df_curve(a, predsegs, self.results.segfracs[:,sliceidx], overlay_ys=expt)
             else:
-                for a, predsegs in zip(axs2, np.hstack((self.results.segres, self.results.c_segfracs[-1]))[startslice:endslice+1]):
-                    _plot_log_df_curve(a, predsegs)
+                for a, predsegs, sliceidx in zip(axs2, \
+                                       np.hstack((self.results.segres, self.results.c_segfracs[-1]))[startslice:endslice+1], \
+                                       range(startslice,endslice+1)):
+                    _plot_log_df_curve(a, predsegs, self.results.segfracs[:,sliceidx])
 
             return fig1, fig2
 
@@ -546,26 +678,22 @@ class Plots():
            Plots are saved to a multi-page PDF file df_convergence.pdf, with one
            segment per page.""" 
 
-        def _plot_df_convergence(block_fracs, cumul_fracs, seg):
+        def _plot_df_convergence(block_fracs, cumul_fracs, block_errs, seg):
             fig = plt.figure(figsize=(11, 8.5)) # Letter
-#            fig.suptitle("Convergence of predicted fractions across trajectory", fontsize=16)
             fig.suptitle("Convergence of predicted fractions across trajectory")
             ax = fig.gca()
-#            ax.set_title("Segment %s-%s" % (seg[0], seg[1]), fontsize=12)
             ax.set_title("Segment %s-%s" % (seg[0], seg[1]))
             xs = self.results.c_n_frames
             for timeidx in range(len(self.results.params['times'])):
-                ax.plot(xs, cumul_fracs[:, timeidx], label="Time %s min" % self.results.params['times'][timeidx])
-                ax.scatter(xs, block_fracs[:, timeidx], marker='o')
+                l = ax.plot(xs, cumul_fracs[:, timeidx], label="Time %s min, blocks +/- std. err." % self.results.params['times'][timeidx])
+                ax.errorbar(xs, block_fracs[:, timeidx], yerr=block_errs[:, timeidx], fmt='o', capsize=2, color=l[-1].get_color())
             ax.set_ylim(0.0, 1.25) # Space for legend
             ax.set_yticks(np.arange(0.0,1.2,0.2))
-            ax.set_xlim(0, xs[-1] * 1.05) 
-            final = xs[-1]
             blocksize = self.results.n_frames[0]
-            xticknums = range(0, int(final) - (blocksize / 2 +1), blocksize) # Tick labels at block intervals
-                                                                             # skipping last label if it's within 1/2 of previous
-            xticknums.append(final)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins='auto', steps=[1, 2, 5, 10]))
+            xticknums = self._fix_ticks(ax.get_xticks(), xs[-1], blocksize)
             ax.set_xticks(xticknums)
+            ax.set_xlim(0, xs[-1] * 1.05) 
             ax.set_xlabel("Trajectory frame") 
             ax.set_ylabel("Deuterated fraction") 
             ax.legend(loc='upper center')
@@ -575,6 +703,7 @@ class Plots():
             for i, currseg in enumerate(self.results.segres):
                 currfig = _plot_df_convergence(self.results.segfracs[:,i,:], \
                                                self.results.c_segfracs[:,i,:], \
+                                               self.results.seg_SEMs[:,i,:], \
                                                currseg)
                 pdf.savefig(currfig)
                 plt.close()
@@ -590,7 +719,6 @@ class Plots():
         def _plot_seg_curve(ax, cumul_fracs, seglist, blocksize, time, overlay_fracs=None):
             xs = range(1,len(seglist)+1)
             labels = [ str(i[0])+"-"+str(i[1]) for i in seglist ]
-#            ax.set_title("Time = %s min, block size = %d" % (time, blocksize), fontsize=12)
             ax.set_title("Time = %s min, block size = %d" % (time, blocksize))
             ax.set_xticks(xs)
             ax.set_xticklabels(labels, rotation='vertical')
@@ -603,26 +731,19 @@ class Plots():
                         label="Predicted fraction, R = %3.2f" % self.results.correls[timeidx])
                 ax.plot(xs, overlay_fracs, \
                         label="Experimental fraction", linestyle=':')
-#                fig.suptitle("By-segment predicted & experimental deuterated fractions", \
-#                             fontsize=16)
                 fig.suptitle("By-segment predicted & experimental deuterated fractions")
             else:
                 ax.plot(xs, cumul_fracs, label="Predicted fraction")
-#                fig.suptitle("By-segment predicted deuterated fractions", \
-#                             fontsize=16)
                 fig.suptitle("By-segment predicted deuterated fractions")
             return ax
 
         def _fill_seg_range(ax, seg_fracs, seglist, cumul_fracs=None):
             xs = range(1,len(seglist)+1)
             segmaxs, segmins = np.zeros(seg_fracs.shape[1]), np.zeros(seg_fracs.shape[1])
-#            for segidx in range(len(segmaxs)):
-#                segmaxs[segidx] = np.max(seg_fracs[:, segidx])
-#                segmins[segidx] = np.min(seg_fracs[:, segidx])
             # Optional +/- std dev
             for segidx in range(len(segmaxs)):
-                segmaxs[segidx] = np.std(seg_fracs[:, segidx])
-                segmins[segidx] = -1 * np.std(seg_fracs[:, segidx])
+                segmaxs[segidx] = np.std(seg_fracs[:, segidx], ddof=1) # Pop std. dev.
+                segmins[segidx] = -1 * np.std(seg_fracs[:, segidx], ddof=1) # Pop std. dev.
             segmaxs += cumul_fracs
             segmins += cumul_fracs
             ax.fill_between(xs, segmaxs, segmins, color='gray', alpha=0.3, label="Std. Dev. across trajectory blocks")
@@ -633,7 +754,6 @@ class Plots():
             ax = fig.gca()
             xs = range(1,len(seglist)+1)
             labels = [ str(i[0])+"-"+str(i[1]) for i in seglist ]
-#            ax.set_title("All timepoints (times in min)", fontsize=12)
             ax.set_title("All timepoints (times in min)")
             ax.set_xticks(xs)
             ax.set_xticklabels(labels, rotation='vertical')
@@ -643,8 +763,6 @@ class Plots():
 
             for timeidx, t in enumerate(times):
                     ax.plot(xs, cumul_fracs[:, timeidx], label="Predicted @ time %s" % t)
-#                    fig.suptitle("By-segment predicted deuterated fractions", \
-#                                 fontsize=16)
                     fig.suptitle("By-segment predicted deuterated fractions")
             ax.legend()
             fig.tight_layout(rect=[0,0,1,0.95])
@@ -689,19 +807,16 @@ class Plots():
             # Raw PFs
             fig = plt.figure(figsize=(11, 8.5)) # Letter
             ax = fig.gca()
-            initial, final = self.results.reslist[0], self.results.reslist[-1]
-            xs = self.results.reslist
-            xticknums = [initial]
-            intermedx = range(50, final - 24, 50) # Residue labels at 50 res intervals
-                                                  # skipping last label if it's within 25 of the previous
-            xticknums.extend(intermedx)
-            xticknums.append(final)
+            xs = self.results.resnums # ResIDs 
             ax.plot(xs, self.results.c_pfs[-1], linewidth=1)
-#            ax.set_title("Mean by-residue protection factors", fontsize=16)
             ax.set_title("Mean by-residue protection factors")
             ax.set_ylabel("Protection factor")
             ax.set_xlabel("Residue")
-            ax.set_xticks(xticknums)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins='auto', steps=[1,2,5,10]))
+            xticknums = self._fix_ticks(ax.get_xticks(), xs[-1], 50, mindata=xs[0])
+            ax.set_xticks(xticknums) # Residue labels at auto intervals
+                                     # skipping last label if it's within 25 of the previous
+            ax.set_xlim(0, xs[-1] *1.05)
             fig.tight_layout() # No fig.suptitle = default figure coords
             pdf.savefig(fig)
             plt.close()
@@ -709,21 +824,17 @@ class Plots():
             # Log PFs
             fig = plt.figure(figsize=(11, 8.5)) # Letter
             ax = fig.gca()
-            initial, final = self.results.reslist[0], self.results.reslist[-1]
-            xs = self.results.reslist
-            xticknums = [initial]
-            intermedx = range(50, final - 24, 50) # Residue labels at 50 res intervals
-                                                  # skipping last label if it's within 25 of the previous
-            xticknums.extend(intermedx)
-            xticknums.append(final)
-#            ax.plot(xs, np.log10(self.results.c_pfs[-1]), linewidth=1)
+            xs = self.results.resnums # ResIDs
             ax.plot(xs, self.results.c_pfs[-1], linewidth=1)
             ax.set_yscale('log')
-#            ax.set_title("Mean by-residue protection factors (log-scaled)", fontsize=16)
             ax.set_title("Mean by-residue protection factors (log-scaled)")
             ax.set_ylabel('Protection factor (log-scaled)')
             ax.set_xlabel("Residue")
-            ax.set_xticks(xticknums)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins='auto', steps=[1,2,5,10]))
+            xticknums = self._fix_ticks(ax.get_xticks(), xs[-1], 50, mindata=xs[0])
+            ax.set_xticks(xticknums) # Residue labels at auto intervals
+                                     # skipping last label if it's within 25 of the previous
+            ax.set_xlim(0, xs[-1] *1.05)
             fig.tight_layout() # No fig.suptitle = default figure coords
             pdf.savefig(fig)
             plt.close()
@@ -743,22 +854,25 @@ class Plots():
 
         with PdfPages("tot_pf.pdf") as pdf:
             # Raw PFs
+            startframe, tots = 0, np.zeros(len(self.results.n_frames))
+            for i, endframe in enumerate(self.results.c_n_frames):
+                tots[i] = stderr(np.sum(self.results.pf_byframe[:,startframe:endframe], axis=0))
+                startframe += self.results.n_frames[i]
             fig = plt.figure(figsize=(11, 8.5)) # Letter
             ax = fig.gca()
             xs = self.results.c_n_frames
-            ax.scatter(xs, np.sum(self.results.pfs, axis=1), label="Block protection factor", marker='o')
-            ax.plot(xs, np.sum(self.results.c_pfs, axis=1), label="Running average")
-#            ax.set_title("Total protection factors across trajectory", fontsize=16)
+            l = ax.plot(xs, np.sum(self.results.c_pfs, axis=1), label="Running average")
+            ax.errorbar(xs, np.sum(self.results.pfs, axis=1), yerr=tots, \
+                                   label="Block protection factor +/- std. err.", fmt='o', capsize=2, color=l[-1].get_color())
             ax.set_title("Total protection factors across trajectory")
             ax.set_ylabel("Protection factor")
             ax.set_xlabel("Trajectory frame")
+            blocksize = self.results.n_frames[0]
+            ax.xaxis.set_major_locator(MaxNLocator(nbins='auto', steps=[1, 2, 5, 10]))
+            xticknums = self._fix_ticks(ax.get_xticks(), xs[-1], blocksize)
+            ax.set_xticks(xticknums)
             ax.set_xlim(0, self.results.c_n_frames[-1] * 1.05)
             ax.set_ylim(_get_ylim(np.min(np.sum(self.results.pfs, axis=1)), np.max(np.sum(self.results.pfs, axis=1)))) 
-            final = xs[-1]
-            blocksize = self.results.n_frames[0]
-            xticknums = range(0, int(final) - (blocksize / 2 +1), blocksize) # Tick labels at block intervals
-                                                                             # skipping last label if it's within 1/2 of previous
-            ax.set_xticks(xticknums)
             ax.legend()
             fig.tight_layout() # No fig.suptitle = default figure coords
             pdf.savefig(fig)
@@ -768,16 +882,69 @@ class Plots():
             fig = plt.figure(figsize=(11, 8.5)) # Letter
             ax = fig.gca()
             xs = self.results.c_n_frames
-            ax.scatter(xs, np.log10(np.sum(self.results.pfs, axis=1)), label="Block protection factor", marker='o')
-            ax.plot(xs, np.log10(np.sum(self.results.c_pfs, axis=1)), label="Running average")
-#            ax.set_title("Log of total protection factors across trajectory", fontsize=16)
-            ax.set_title("Log of total protection factors across trajectory")
-            ax.set_ylabel(r'$log_{10}$(Protection factor)')
+            #ax.scatter(xs, np.log10(np.sum(self.results.pfs, axis=1)), label="Block protection factor", marker='o')
+            #ax.plot(xs, np.log10(np.sum(self.results.c_pfs, axis=1)), label="Running average")
+            l = ax.plot(xs, np.sum(self.results.c_pfs, axis=1), label="Running average")
+            ax.errorbar(xs, np.sum(self.results.pfs, axis=1), yerr=tots, \
+                                   label="Block protection factor +/- std. err.", fmt='o', capsize=2, color=l[-1].get_color())
+            ax.set_title("Total protection factors across trajectory (log-scaled)")
+            ax.set_ylabel('Protection factor (log-scaled)')
             ax.set_xlabel("Trajectory frame")
-            ax.set_xlim(0, self.results.c_n_frames[-1] * 1.05)
-            ax.set_ylim(np.floor(np.log10(np.max(np.sum(self.results.pfs, axis=1)))), \
-                        np.ceil(np.log10(np.max(np.sum(self.results.pfs, axis=1))))) 
+            ax.xaxis.set_major_locator(MaxNLocator(nbins='auto', steps=[1, 2, 5, 10]))
+            xticknums = self._fix_ticks(ax.get_xticks(), xs[-1], blocksize)
             ax.set_xticks(xticknums)
+            ax.set_xlim(0, self.results.c_n_frames[-1] * 1.05)
+            ax.set_yscale('log')
+            ax.set_ylim(10**np.floor(np.log10(np.max(np.sum(self.results.pfs, axis=1)))), \
+                        10**np.ceil(np.log10(np.max(np.sum(self.results.pfs, axis=1))))) 
+            ax.legend()
+            fig.tight_layout() # No fig.suptitle = default figure coords
+            pdf.savefig(fig)
+            plt.close()
+
+    
+    def pf_error(self):
+        """Plot convergence of standard errors in total protection factor,
+           with respect to block size.
+
+           Measure of suitability of block size choice
+           
+           Plots are saved to a multi-page PDF file pf_error.pdf""" 
+
+        with PdfPages("pf_error.pdf") as pdf:
+            fig = plt.figure(figsize=(11, 8.5)) # Letter
+            ax = fig.gca()
+            xs, ys = self.results.tot_SEMs[:,0], self.results.tot_SEMs[:,1]
+            ax.plot(xs, ys, label="Standard error across block averages", marker='.')
+            ax.set_title("Convergence of error in total protection factor with block size")
+            ax.set_ylabel('Std. Err.')
+            ax.set_xlabel("Block size / frames")
+            ax.xaxis.set_major_locator(MaxNLocator(nbins='auto', steps=[1, 2, 5, 10]))
+            xticknums = self._fix_ticks(ax.get_xticks(), xs[-1], 100)
+            ax.set_xticks(xticknums)
+            ax.set_xlim(0, (self.results.c_n_frames[-1] / 2) * 1.05)
+            ax.legend()
+            fig.tight_layout() # No fig.suptitle = default figure coords
+            pdf.savefig(fig)
+            plt.close()
+            
+            # Normalised by residue, overlaid with normalised tot_pf
+            fig = plt.figure(figsize=(11, 8.5)) # Letter
+            ax = fig.gca()
+            xs, ys = self.results.norm_res_SEMs[0,:,0], self.results.norm_res_SEMs[0,:,1] 
+            ax.plot(xs, ys, label="Individual residue PF normalized std. errors", linewidth=1, alpha=0.2, color='gray')
+            for line in self.results.norm_res_SEMs[1:]:
+                xs, ys = line[:,0], line[:,1]
+                ax.plot(xs, ys, linewidth=1, alpha=0.2, color='gray')
+            xs, ys = self.results.norm_tot_SEMs[:,0], self.results.norm_tot_SEMs[:,1]
+            ax.plot(xs, ys, label="Total PF normalized std. error", marker='.')
+            ax.set_title("Convergence of standard errors normalized to maximum value")
+            ax.set_ylabel('Normalized Std. Err.')
+            ax.set_xlabel("Block size / frames")
+            ax.xaxis.set_major_locator(MaxNLocator(nbins='auto', steps=[1, 2, 5, 10]))
+            xticknums = self._fix_ticks(ax.get_xticks(), xs[-1], 100)
+            ax.set_xticks(xticknums)
+            ax.set_xlim(0, (self.results.c_n_frames[-1] / 2) * 1.05)
             ax.legend()
             fig.tight_layout() # No fig.suptitle = default figure coords
             pdf.savefig(fig)
