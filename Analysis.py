@@ -323,7 +323,10 @@ class Analyze():
             f.write("Total frames divisible by: %s,\nEvaluating standard error in total PF at these windows.\n"\
                     % " ".join([ str(i) for i in valid_windows ]))
         valid_windows = np.asarray(valid_windows, dtype=np.int32)
-        self.tot_SEMs = np.zeros((len(valid_windows), 2))
+        if len(valid_windows) > 0: # 1 or prime frames
+            self.tot_SEMs = np.zeros((len(valid_windows), 2)) 
+        else:
+            self.tot_SEMs = np.zeros((1, 2)) 
         for i, window in enumerate(valid_windows):
             self.tot_SEMs[i, 0] = window
             self.tot_SEMs[i, 1] = stderr(self._windowed_average(np.sum(self.pf_byframe, axis=0), window))
@@ -331,8 +334,12 @@ class Analyze():
         self.norm_tot_SEMs[:,1] /= np.max(self.tot_SEMs[:,1]) # Normalised to max
 
 #       Array(res, window, SEM)
-        self.res_SEMs = np.zeros((len(self.resnums), len(valid_windows), 2))
-        self.res_STDs = np.zeros((len(self.resnums), len(valid_windows), 2))
+        if len(valid_windows) > 0: # 1 or prime frames
+            self.res_SEMs = np.zeros((len(self.resnums), len(valid_windows), 2))
+            self.res_STDs = np.zeros((len(self.resnums), len(valid_windows), 2))
+        else:
+            self.res_SEMs = np.zeros((len(self.resnums), 1, 2))
+            self.res_STDs = np.zeros((len(self.resnums), 1, 2))
         for j, res in enumerate(self.resnums):
             for i, window in enumerate(valid_windows):
                 self.res_SEMs[j,i,0] = window
