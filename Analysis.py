@@ -105,13 +105,13 @@ class Analyze():
         try:
             expt = np.loadtxt(self.params['expfile'], dtype=[ ('segres', np.int32, (2,)),\
                               ('fracs', np.float64, (len(self.params['times']),)) ])
-        except ValueError:
-            raise Functions.HDX_Error("""There's a problem with your experimental data file, it's shorter than the number of timepoints you evaluated""")
+        except ValueError, err:
+            raise Functions.HDX_Error("""There's a problem with your experimental data file. Perhaps it has too few timepoints. The error while reading was: %s""" % str(err))
         # Now check I'm not loading in too few timepoints
         try:
             expt = np.loadtxt(self.params['expfile'], dtype=[ ('segres', np.int32, (2,)),\
                               ('fracs', np.float64, (len(self.params['times']) + 1,)) ])
-            raise Functions.HDX_Error("""There's a problem with your experimental data file, it's longer than the number of timepoints you evaluated""")
+            raise Functions.HDX_Error("""There's a problem with your experimental data file. Perhaps it has too many timepoints.""")
         except ValueError:
             pass
         # Check expt = predicted
