@@ -292,8 +292,8 @@ class Radou():
         # Setup residue/atom lists        
         hn_atms = Functions.extract_HN(self.t, log=self.params['logfile'])
         prolines = Functions.list_prolines(self.t, log=self.params['logfile'])
-        # All protein residues except prolines
-        reslist = [ r.index for r in self.top.residues if r.is_protein and r.index not in prolines[:,1] ]
+        # Check all hn_atoms are from protein residues except prolines
+        reslist = [ self.top.atom(a).residue.index for a in hn_atms if self.top.atom(a).residue.is_protein and self.top.atom(a).residue.index not in prolines[:,1] ]
 
         # Calc Nc/Nh
         hres, hbonds = self.calc_hbonds(hn_atms)
