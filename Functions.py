@@ -14,27 +14,28 @@ class HDX_Error(Exception):
     """Exception in HDX module"""
 
 # Functions
-def load_fulltraj(traj, parm, start=1, stop=None, stride=1, **kwargs):
+def load_fulltraj(traj, parm, start=1, stop=None, stride=1, standard_names=True, **kwargs):
     """Loads an MDtraj trajectory object with the desired topology
        and coordinates.
        Usage: setup_universe(parm,traj,[start=1,stop=None,stride=1,**kwargs])
        Standard kwargs include atom_indices (an array of 0-indexed
        atoms to keep) and stride (integer of every nth frame to keep).
 
-       'standard_names=False' may also be useful for PDB topologies,
-       otherwise amide H might be renamed from the atom names provided
-       to the standard PDB identifiers (e.g. 'H', 'H2', 'H3' for the 
-       terminal NH3 group).
+       'standard_names=False' (not the default here, or in MDTraj) 
+       may also be useful for PDB topologies, otherwise amide H might
+       be renamed from the atom names provided to the standard PDB identifiers
+       (e.g. 'H', 'H2', 'H3' for the terminal NH3 group).
        
        Returns a complete trajectory, which may be memory intensive.
 
        See also load_trajchunks for an iterative load of large trajectories """
-    t = md.load(traj, top=parm, **kwargs)
+    parmobj = md.load_topology(parm, standard_names=standard_names)
+    t = md.load(traj, top=parmobj, **kwargs)
     if stop is None:
         stop = t.n_frames
     return t[start-1:stop:stride] # Start is zero indexed
 
-def load_trajchunks(traj, parm, start=1, stride=1, **kwargs):
+def load_trajchunks(traj, parm, start=1, stride=1, standard_names=True, **kwargs):
     """Loads a file into a generator of MDtraj trajectory chunks.
        Useful for large/memory intensive trajectory files
        Usage: load_trajchunks(traj, parm, [start=1, stride=1, **kwargs])
@@ -42,13 +43,14 @@ def load_trajchunks(traj, parm, start=1, stride=1, **kwargs):
        to load per iteration), and atom_indices (an array of 0-indexed
        atoms to keep).
        
-       'standard_names=False' may also be useful for PDB topologies,
-       otherwise amide H might be renamed from the atom names provided
-       to the standard PDB identifiers (e.g. 'H', 'H2', 'H3' for the 
-       terminal NH3 group).
+       'standard_names=False' (not the default here, or in MDTraj)
+       may also be useful for PDB topologies, otherwise amide H might
+       be renamed from the atom names provided to the standard PDB identifiers
+       (e.g. 'H', 'H2', 'H3' for the terminal NH3 group). 
    
        Returns a generator object with trajectory iterations."""
-    return md.iterload(traj, top=parm, skip=start-1, stride=stride, **kwargs) # Start is zero indexed
+    parmobj = md.load_topology(parm, standard_names=standard_names)
+    return md.iterload(traj, top=parmobj, skip=start-1, stride=stride, **kwargs) # Start is zero indexed
 
 def itertraj_slice(gen, chunk, end, stride=1):
     """Slices a generator (returned by load_trajchunks) of size chunk

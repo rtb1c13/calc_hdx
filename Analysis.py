@@ -790,7 +790,7 @@ class Plots():
                 else:
                     fig.suptitle("By-segment predicted deuterated fractions")
                     ax1 = _plot_seg_curve(ax1, self.results.c_segfracs[-1,:,timeidx], self.results.segres, \
-                                          self.results.n_frames[0], t, self.results.expfracs[:,timeidx])
+                                          self.results.n_frames[0], t)
                     ax1 = _fill_seg_range(ax1, self.results.segfracs[:,:,timeidx], self.results.segres, \
                                           self.results.c_segfracs[-1,:,timeidx])
                 ax1.legend()
