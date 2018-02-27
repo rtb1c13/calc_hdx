@@ -443,8 +443,8 @@ class Analyze():
             raise Functions.HDX_Error("Can't write summary segment fractions - perhaps you haven't calculated them yet?")
         
     
-    def run(self, figs=False):
-        """Runs a by-segment HDX prediction and optionally graphs results"""
+    def run(self):
+        """Runs a by-segment HDX prediction and optionally compares to experiment"""
 
         self.read_segfile()
         self.check_blocksize()
