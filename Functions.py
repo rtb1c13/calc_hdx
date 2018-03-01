@@ -29,7 +29,10 @@ def load_fulltraj(traj, parm, start=1, stop=None, stride=1, standard_names=True,
        Returns a complete trajectory, which may be memory intensive.
 
        See also load_trajchunks for an iterative load of large trajectories """
-    parmobj = md.load_topology(parm, standard_names=standard_names)
+    try:
+        parmobj = md.load_topology(parm, standard_names=standard_names)
+    except TypeError:
+        parmobj = md.load_topology(parm) # MDTraj only has standard_names kwarg for certain filetypes
     t = md.load(traj, top=parmobj, **kwargs)
     if stop is None:
         stop = t.n_frames
@@ -49,7 +52,10 @@ def load_trajchunks(traj, parm, start=1, stride=1, standard_names=True, **kwargs
        (e.g. 'H', 'H2', 'H3' for the terminal NH3 group). 
    
        Returns a generator object with trajectory iterations."""
-    parmobj = md.load_topology(parm, standard_names=standard_names)
+    try:
+        parmobj = md.load_topology(parm, standard_names=standard_names)
+    except TypeError:
+        parmobj = md.load_topology(parm) # MDTraj only has standard_names kwarg for certain filetypes
     return md.iterload(traj, top=parmobj, skip=start-1, stride=stride, **kwargs) # Start is zero indexed
 
 def itertraj_slice(gen, chunk, end, stride=1):

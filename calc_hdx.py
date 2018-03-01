@@ -27,10 +27,10 @@ def parse():
     parser.add_argument("-str","--stride",help="Stride at which to read the trajectory. Default = 1 (every frame)", type=int, default=1)
     parser.add_argument("-c","--chunks",help="If set, trajectory will be read in chunks of this size (lowers memory requirements for large trajectories). Default = 1000", nargs='?', type=int, const=1000)
     parser.add_argument("-sel","--select",help="MDTraj format selection string for atoms to select for analysis from trajectories. Default = 'all'", default='all')
-    parser.add_argument("-m","--method",help="Method for analysis. Currently 'Radou' is the only option", choices=['Radou'], default='Radou', required=True)
+    parser.add_argument("-m","--method",help="Method for analysis. Currently choose between 'Radou' or 'PerssonHalle'", choices=['Radou', 'PerssonHalle'], default='Radou', required=True)
     parser.add_argument("-dt","--times",help="Times for analysis, in minutes. Defaults to [ 0.167, 1.0, 10.0, 120.0 ]", nargs='+', default=[0.167, 1.0, 10.0, 120.0], type=float)
     parser.add_argument("-log","--logfile",help="Name of logfile for printout of run info. Defaults to 'HDX_analysis.log'", type=str, default='HDX_analysis.log')
-    parser.add_argument("-seg","--segfile",help="Name of file with segment definitions for analysis. Segments should be defined one per line, with starting/finishing residues whitespace separated. Defaults to 'cropped_seg.list'",type=str, default='cropped_seg.list')
+    parser.add_argument("-seg","--segfile",help="Name of file with segment definitions for analysis. Segments should be defined one per line, with starting/finishing residues whitespace separated. Defaults to 'segfile.txt'",type=str, default='segfile.txt')
     parser.add_argument("-exp","--expfile",help="Name of file with experimental deuterated fractions. Segments should be identical to those in segfile, defined one per line, followed by one column for each timepoint in --times. Whitespace separated. No default.")
     parser.add_argument("-out","--outprefix",help="Prefix for prediction output files",type=str, default='')
     parser.add_argument("-mopt","--method_options",help="Additional method options. Should be provided as a single string in Python dictionary format, e.g.:  '{ 'hbond_method' : 'contacts', 'cut_Nc' : 0.70, 'save_contacts' : True }' (Note the string must be enclosed in quotes)",type=str)
@@ -56,7 +56,8 @@ def parse():
 def _get_method(name):
     """Choose a method to run based on a string"""
     # Switch for methods (add new ones here):
-    methods = { 'radou' : Methods.Radou }
+    methods = { 'radou' : Methods.Radou,
+                'perssonhalle' : Methods.PH }
 
     return methods[name.lower()]
     
@@ -171,8 +172,20 @@ if __name__ == '__main__':
                        args.stride, args.select, args.method,\
                        args.method_options, args.analysis_options)
     analysis.run()
-    if args.chunks is not None:
-        analysis.print_summaries()
     # Automatic basic plotting
-    plots = Analysis.Plots(analysis)
-    plots.run()
+    if args.chunks is not None:
+        # Switch here for methods that don't have a meaningful 'by-frame' PF estimation
+        # These require analysis/plotting over the sum total of ALL chunks
+        if args.method in ['PerssonHalle']:
+            summed_analysis = Analysis.Analyze(results, results.top, **args.analysis_options)
+            summed_analysis.run()
+            summed_analysis.print_summaries()
+            summed_plots = Analysis.Plots(summed_analysis)
+            summed_plots.run()
+        else:
+            analysis.print_summaries()
+            plots = Analysis.Plots(analysis)
+            plots.run()
+    else:
+        plots = Analysis.Plots(analysis)
+        plots.run()
