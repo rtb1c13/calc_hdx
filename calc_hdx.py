@@ -65,7 +65,7 @@ def _update_options(opts, **updates):
     """Updates options dictionary with extra kwargs"""
     opts.update(updates)
 
-def predict(traj, method, mopts, aopts):
+def predict(traj, method, mopts, aopts, saveprefix=None):
     """Predicts fraction of deuterium exchange for residues in the given
        trajectory, using the given method and dictionary of options, and
        creates a suitable Analysis.Analyze object to store these results.
@@ -74,8 +74,15 @@ def predict(traj, method, mopts, aopts):
        Returns: (Object of desired method class with completed HDX predictions,
                  Analyze object with completed HDX results)"""
 
+    if saveprefix is not None:
+        if predict.calls == 1:
+            cachefn = saveprefix + '.pkl'
+            predict.calls += 1
+        else:
+            cachefn = saveprefix + '_chunk_%d.pkl' % predict.calls
+            predict.calls += 1
     m_obj = _get_method(method)(**mopts)
-    m_obj.run(traj)
+    m_obj = m_obj.run(traj, cachefn=cachefn)
     a_obj = Analysis.Analyze(m_obj, m_obj.top, **aopts)
     return m_obj, a_obj
 
@@ -96,7 +103,7 @@ def combine_results(first, second):
     comb = [ a + b for a, b in zip(first, second) ]
     return tuple(comb)
 
-def full(trajlist, parm, start, stop, stride, select, method, mopts, aopts):
+def full(trajlist, parm, start, stop, stride, select, method, mopts, aopts, saveprefix):
     """Loads all trajectories in the given list and performs HDX predictions.
        'slicelist' is a list of indices for slicing the trajectory
 
@@ -104,18 +111,20 @@ def full(trajlist, parm, start, stop, stride, select, method, mopts, aopts):
        Returns: (Object of desired method class with completed HDX predictions,
                  Analyze object with completed HDX results)"""
 
+    predict.calls = 1
     t = Functions.load_fulltraj(trajlist, parm=parm, start=start, stop=stop, stride=stride)
     tslice = Functions.select(t, select)
-    summed_results, summed_analysis = predict(tslice, method, mopts, aopts)
+    summed_results, summed_analysis = predict(tslice, method, mopts, aopts, saveprefix)
     return summed_results, summed_analysis
 
-def chunks(trajlist, parm, start, stop, stride, select, chunksize, method, mopts, aopts):
+def chunks(trajlist, parm, start, stop, stride, select, chunksize, method, mopts, aopts, saveprefix):
     """Load trajectories in the given list in chunks and perform HDX predictions.
 
        Usage: chunks(trajlist, parm, stride, chunksize, method, method_options, analysis_options)
        Returns: (Object of desired method class with completed HDX predictions summed over all frames,
                  Analyze object with completed HDX results by chunk and cumulatively)"""
 
+    predict.calls = 1
     fulllist = []
     for t in trajlist:
         if stop is None:
@@ -126,7 +135,7 @@ def chunks(trajlist, parm, start, stop, stride, select, chunksize, method, mopts
         f_to_yield = final_frame - (start - 1)
         # Sums generator with __add__ of desired method
         fulllist.append(reduce(combine_results, \
-                               (predict(Functions.select(t_chunk, select), method, mopts, aopts) for t_chunk in \
+                               (predict(Functions.select(t_chunk, select), method, mopts, aopts, saveprefix) for t_chunk in \
                                Functions.itertraj_slice(t_gen, chunksize, f_to_yield, stride=stride))))
     
     resultlist = [ tup[0] for tup in fulllist ]
@@ -166,26 +175,27 @@ if __name__ == '__main__':
     if args.chunks is not None:
         results, analysis = chunks(args.traj, args.parm, args.start, args.end,\
                          args.stride, args.select, args.chunks,\
-                         args.method, args.method_options, args.analysis_options)
+                         args.method, args.method_options, args.analysis_options, saveprefix='results')
     else:
         results, analysis = full(args.traj, args.parm, args.start, args.end,\
                        args.stride, args.select, args.method,\
-                       args.method_options, args.analysis_options)
-    analysis.run()
+                       args.method_options, args.analysis_options, saveprefix='results')
     # Automatic basic plotting
     if args.chunks is not None:
         # Switch here for methods that don't have a meaningful 'by-frame' PF estimation
         # These require analysis/plotting over the sum total of ALL chunks
         if args.method in ['PerssonHalle']:
             summed_analysis = Analysis.Analyze(results, results.top, **args.analysis_options)
-            summed_analysis.run()
+            summed_analysis = summed_analysis.run(cachefn='analysis.pkl')
             summed_analysis.print_summaries()
             summed_plots = Analysis.Plots(summed_analysis)
             summed_plots.run()
         else:
+            analysis = analysis.run(cachefn='analysis.pkl')
             analysis.print_summaries()
             plots = Analysis.Plots(analysis)
             plots.run()
     else:
+        analysis = analysis.run(cachefn='analysis.pkl')
         plots = Analysis.Plots(analysis)
         plots.run()

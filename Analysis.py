@@ -443,6 +443,7 @@ class Analyze():
             raise Functions.HDX_Error("Can't write summary segment fractions - perhaps you haven't calculated them yet?")
         
     
+    @Functions.cacheobj()    
     def run(self):
         """Runs a by-segment HDX prediction and optionally compares to experiment"""
 
@@ -453,6 +454,7 @@ class Analyze():
         if self.params['expfile'] is not None:
             self.read_expfile()
             self.desc_stats()
+        return self # For consistency with pickle
 
 ### Plotting Class
 class Plots():

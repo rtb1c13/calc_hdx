@@ -261,6 +261,7 @@ class Radou(DfPred.DfPredictor):
 
         return hres, pf_bar, pf_byframe
 
+    @Functions.cacheobj()
     def run(self, trajectory):
         """Runs a by-residue HDX prediction for the provided MDTraj trajectory
 
@@ -278,6 +279,7 @@ class Radou(DfPred.DfPredictor):
         self.rates = self.kint()
         self.resfracs = self.dfrac()
         print("Residue predictions complete")
+        return self # Required for consistency with pickle
 
 ### Add further classes for methods below here
 
@@ -370,6 +372,7 @@ class PH(DfPred.DfPredictor):
             self.pf_byframe = np.repeat(np.atleast_2d(self.pfs).T, self.n_frames, axis=1)
         self.pfs = np.stack((self.pfs, np.zeros(len(self.watcontacts))), axis=1)
         
+    @Functions.cacheobj()
     def run(self, trajectory):
         """Runs a by-residue HDX prediction for the provided MDTraj trajectory
 
@@ -387,3 +390,4 @@ class PH(DfPred.DfPredictor):
         self.rates = self.kint()
         self.resfracs = self.dfrac()
         print("Residue predictions complete")
+        return self # Required for consistency with pickle

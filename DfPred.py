@@ -9,7 +9,6 @@ import numpy as np
 import os, glob, itertools
 import Functions
 
-
 class DfPredictor(object):
     """Superclass for all methods that use the general rate equation:
 

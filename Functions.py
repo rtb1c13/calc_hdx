@@ -7,7 +7,7 @@ from __future__ import division
 #
 import mdtraj as md
 import numpy as np
-
+import pickle
 
 # Exception for HDX
 class HDX_Error(Exception):
@@ -159,4 +159,30 @@ def extract_HN(traj, prolines=None, atomselect="(name H or name HN)", log="HDX_a
                     "%s\n" % '\n'.join(atm2res(i) for i in traj.topology.select(atomselect))) 
         return traj.topology.select(atomselect)
 
+def cacheobj(cachefn=None):
+    def pickle_decorator(func):
+        def pickle_wrapped_func(*args,**kwargs):
+            fn = kwargs.pop('cachefn')
 
+            try:
+                cached_obj = pickle.load(open(fn,'rb'))
+                try:
+                    # args[0] is 'self' for class methods
+                    with open(args[0].params['logfile'],'a') as f:
+                        f.write("Read cache from file %s\n" % fn)
+                except KeyError:
+                    print("Read cache from file %s\n" % fn)
+                return cached_obj
+
+            except (IOError, EOFError, TypeError):
+                new_obj = func(*args, **kwargs)
+            pickle.dump(args[0], open(fn,'wb'), protocol=-1) # Highest protocol for size purposes
+            try:
+                with open(args[0].params['logfile'],'a') as f:
+                    f.write("Saved cache to file %s\n" % fn)
+            except KeyError:
+                print("Saved cache to file %s\n" % fn)
+            return new_obj
+
+        return pickle_wrapped_func
+    return pickle_decorator
