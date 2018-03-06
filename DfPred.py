@@ -112,6 +112,19 @@ class DfPredictor(object):
             rate_params.update(self.params['kint_params'])
         self.params['kint_params'] = rate_params
 
+    def __getstate__(self):
+        """Set state of object for pickling.
+           Additional attributes can be removed here"""
+        odict = self.__dict__.copy()
+        # Ignore key errors here as deepcopy in Analysis object __add__ also uses
+        # this __getstate__
+        for k in ['t']: # Copy of topology, MDTraj trajectory object
+            try:
+                del odict[k] 
+            except KeyError:
+                pass
+        return odict
+
     def pro_omega_indices(self, prolines):
         """Calculates omega dihedrals (CA-C-N-CA) for all proline
            residues in a given prolines array from list_prolines.

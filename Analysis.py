@@ -42,7 +42,7 @@ class Analyze():
             self.pfs = np.reshape(resobj.pfs[:,0], (1, len(resobj.pfs)))
             self.c_pfs = np.copy(self.pfs)
             # Cumulative n_frames = 1D-array[n_frames]
-            self.n_frames = np.atleast_1d(resobj.t.n_frames)
+            self.n_frames = np.atleast_1d(resobj.n_frames)
             self.c_n_frames = np.copy(self.n_frames)
             # Topology & rates
             self.rates = resobj.rates
@@ -102,6 +102,18 @@ class Analyze():
 #                raise Functions.HDX_Error("Error when adding analysis objects - have you made any HDX predictions yet?")
         else:
             return self
+
+
+#     def __getstate__(self):
+#        """Set state of object for pickling.
+#           Additional attributes can be removed here"""
+#        odict = self.__dict__.copy()
+#        for k in ['resobj']: # Results object
+#            try:
+#                del odict[k]
+#            except KeyError:
+#                pass
+#        return odict
 
 
     def _windowed_average(self, data, window):
@@ -445,7 +457,7 @@ class Analyze():
     
     @Functions.cacheobj()    
     def run(self):
-        """Runs a by-segment HDX prediction and optionally compares to experiment"""
+        """Run a by-segment HDX prediction and optionally compares to experiment"""
 
         self.read_segfile()
         self.check_blocksize()
