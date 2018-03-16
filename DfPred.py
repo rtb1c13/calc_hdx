@@ -6,8 +6,9 @@ from __future__ import division
 # 
 import mdtraj as md
 import numpy as np
-import os, glob, itertools
+import os, glob, itertools, pickle
 import Functions
+
 
 class DfPredictor(object):
     """Superclass for all methods that use the general rate equation:
@@ -116,14 +117,36 @@ class DfPredictor(object):
         """Set state of object for pickling.
            Additional attributes can be removed here"""
         odict = self.__dict__.copy()
+        delparams = ['t'] # MDTraj trajectory object
+        if os.path.exists(self.params['outprefix']+"topology.pkl"):
+            delparams.append('top')
+        else:
+            pickle.dump(odict.pop('top'), open(self.params['outprefix']+"topology.pkl", 'wb'), protocol=-1)
+
         # Ignore key errors here as deepcopy in Analysis object __add__ also uses
         # this __getstate__
-        for k in ['t']: # Copy of topology, MDTraj trajectory object
+        for k in delparams:
             try:
                 del odict[k] 
             except KeyError:
                 pass
         return odict
+
+    def __setstate__(self, d):
+        """Set state of object after pickling.
+           Additional attributes can be added here"""
+        self.__dict__ = d
+        if os.path.exists(self.params['outprefix']+"topology.pkl"):
+            try:
+                self.top = pickle.load(open(self.params['outprefix']+"topology.pkl", 'rb'))
+            except (IOError, EOFError):
+                raise Functions.HDX_Error("Can't read cached topology file %s. "\
+                                          "Re-run calculation after removing the file." \
+                                           % (self.params['outprefix']+"topology.pkl"))
+        else:
+            raise Functions.HDX_Error("No such cache file %s. Re-run the calculation, it should be " \
+                                      "created automatically if a Df prediction is run." \
+                                      % (self.params['outprefix']+"topology.pkl"))
 
     def pro_omega_indices(self, prolines):
         """Calculates omega dihedrals (CA-C-N-CA) for all proline
@@ -223,7 +246,7 @@ class DfPredictor(object):
                 if any((nterm_manual, cterm_manual)):
                     f.write("One or more of the chain termini is not a protein residue.\n"
                             "This could be because you don't have chain info in your topology,\n"
-                            "Or because ligands/waters/ions are identified as separate chains.\n"
+                            "or because ligands/waters/ions are identified as separate chains.\n"
                             "Selecting termini from protein residues instead, check below:\n")
                 
                 f.write("N-terminus identified at: %s\nC-terminus identified at: %s\n" \
@@ -289,7 +312,7 @@ class DfPredictor(object):
         for i in reslist:
             curr = self.top.residue(i)
             try:
-                if np.max(curr.cis_byframe): # If cis-proline is true for any frame
+                if np.max(self.cis_byframe[i]): # If cis-proline is true for any frame
                     oldnames[i] = curr.name
                     curr.name = 'PROC'
                     continue
@@ -419,6 +442,8 @@ class DfPredictor(object):
             curr_pfs = alternate_pfs
             if len(set(map(len,[self.reslist, alternate_pfs, self.rates]))) != 1: # Check that all lengths are the same (set length = 1)
                 raise Functions.HDX_Error("Can't calculate deuterated fractions, your provided residue/protection factor/rates arrays are not the same length.")
+
+        curr_pfs[:,1][np.isinf(curr_pfs[:,1])] = 0
 
         try:
             fracs = np.zeros((len(self.reslist), len(self.params['times']), 2))

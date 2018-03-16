@@ -9,6 +9,7 @@ import numpy as np
 import os, glob, itertools
 import Functions, DfPred
 
+
 class Radou(DfPred.DfPredictor):
     """Class for Radou-style analysis. Subclass of DfPredictor.
        Initialises with a dictionary of default parameters for analysis,

@@ -185,17 +185,21 @@ if __name__ == '__main__':
         # Switch here for methods that don't have a meaningful 'by-frame' PF estimation
         # These require analysis/plotting over the sum total of ALL chunks
         if args.method in ['PerssonHalle']:
-            summed_analysis = Analysis.Analyze(results, results.top, **args.analysis_options)
-            summed_analysis = summed_analysis.run(cachefn='analysis.pkl')
+            try:
+                summed_analysis = Analysis.Analyze(results, results.top, **args.analysis_options) 
+            except AttributeError: # 'results' obj may not have topology if it's been deleted for pickling
+                results.__setstate__(results.__dict__) # Loads topology.pkl if found
+                summed_analysis = Analysis.Analyze(results, results.top, **args.analysis_options) 
+            summed_analysis = summed_analysis.run(cachefn=args.outprefix+'analysis.pkl')
             summed_analysis.print_summaries()
             summed_plots = Analysis.Plots(summed_analysis)
             summed_plots.run()
         else:
-            analysis = analysis.run(cachefn='analysis.pkl')
+            analysis = analysis.run(cachefn=args.outprefix+'analysis.pkl')
             analysis.print_summaries()
             plots = Analysis.Plots(analysis)
             plots.run()
     else:
-        analysis = analysis.run(cachefn='analysis.pkl')
+        analysis = analysis.run(cachefn=args.outprefix+'analysis.pkl')
         plots = Analysis.Plots(analysis)
         plots.run()

@@ -5,12 +5,13 @@
 import Functions
 import numpy as np
 import matplotlib.pyplot as plt
-import os, glob, copy, itertools
+import os, glob, copy, itertools, pickle
 from scipy.stats import pearsonr as correl
 from scipy.stats import sem as stderr
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.ticker import MultipleLocator, MaxNLocator
 from cycler import cycler
+
 
 ### Define defaults for matplotlib plots
 plt.rc('lines', linewidth=1.5, markersize=4)
@@ -104,17 +105,35 @@ class Analyze():
             return self
 
 
-#     def __getstate__(self):
-#        """Set state of object for pickling.
-#           Additional attributes can be removed here"""
-#        odict = self.__dict__.copy()
-#        for k in ['resobj']: # Results object
-#            try:
-#                del odict[k]
-#            except KeyError:
-#                pass
-#        return odict
+    def __getstate__(self):
+        """Set state of object for pickling.
+           Additional attributes can be removed here"""
+        odict = self.__dict__.copy()
+        for k1 in ['resobj']: # Results object
+            try:
+                for k2 in ['top']: # topology
+                    del odict[k1].__dict__[k2]
+            except KeyError:
+                pass
+        return odict
 
+    def __setstate__(self, d):
+        """Set state of object after pickling.
+           Additional attributes can be added here"""
+        # This will read in a single topology for the whole analysis.
+        # It may have attributes that differ from those in self.top
+        # e.g. for cis-prolines. These should be recalculated if needed
+        # The pfs/rates/fracs in the results object would be correct though.
+        self.__dict__ = d
+        if os.path.exists(self.params['outprefix']+"topology.pkl"):
+            try:
+                self.resobj.top = pickle.load(open(self.params['outprefix']+"topology.pkl", 'rb'))
+            except (IOError, EOFError):
+                raise Functions.HDX_Error("Can't read cached topology file %s. "\
+                                          "Re-run calculation after removing the file." \
+                                           % (self.params['outprefix']+"topology.pkl"))
+        else:
+            self.resobj.top = self.top
 
     def _windowed_average(self, data, window):
         """Calculate average of non-overlapping windows (size=window) of a set of data.
@@ -339,11 +358,12 @@ class Analyze():
             self.tot_SEMs = np.zeros((len(valid_windows), 2)) 
         else:
             self.tot_SEMs = np.zeros((1, 2)) 
-        for i, window in enumerate(valid_windows):
-            self.tot_SEMs[i, 0] = window
-            self.tot_SEMs[i, 1] = stderr(self._windowed_average(np.sum(self.pf_byframe, axis=0), window))
-        self.norm_tot_SEMs = np.copy(self.tot_SEMs) 
-        self.norm_tot_SEMs[:,1] /= np.max(self.tot_SEMs[:,1]) # Normalised to max
+        with np.errstate(invalid='ignore'): # Ignores infs in stderr calc
+            for i, window in enumerate(valid_windows):
+                self.tot_SEMs[i, 0] = window
+                self.tot_SEMs[i, 1] = stderr(self._windowed_average(np.sum(self.pf_byframe, axis=0), window))
+            self.norm_tot_SEMs = np.copy(self.tot_SEMs) 
+            self.norm_tot_SEMs[:,1] /= np.max(self.tot_SEMs[:,1]) # Normalised to max
 
 #       Array(res, window, SEM)
         if len(valid_windows) > 0: # 1 or prime frames
@@ -352,14 +372,15 @@ class Analyze():
         else:
             self.res_SEMs = np.zeros((len(self.resnums), 1, 2))
             self.res_STDs = np.zeros((len(self.resnums), 1, 2))
-        for j, res in enumerate(self.resnums):
-            for i, window in enumerate(valid_windows):
-                self.res_SEMs[j,i,0] = window
-                self.res_SEMs[j,i,1] = stderr(self._windowed_average(self.pf_byframe[j], window))
-                self.res_STDs[j,i,1] = np.std(self._windowed_average(self.pf_byframe[j], window), ddof=1)
-        self.norm_res_SEMs = np.copy(self.res_SEMs)
-        for res in self.norm_res_SEMs:
-            res[:,1] /= np.max(res[:,1]) # Normalised to max
+        with np.errstate(invalid='ignore'): # Ignores infs in stderr calc
+            for j, res in enumerate(self.resnums):
+                for i, window in enumerate(valid_windows):
+                    self.res_SEMs[j,i,0] = window
+                    self.res_SEMs[j,i,1] = stderr(self._windowed_average(self.pf_byframe[j], window))
+                    self.res_STDs[j,i,1] = np.std(self._windowed_average(self.pf_byframe[j], window), ddof=1)
+            self.norm_res_SEMs = np.copy(self.res_SEMs)
+            for res in self.norm_res_SEMs:
+                res[:,1] /= np.max(res[:,1]) # Normalised to max
 
 
     def propagate_errors(self):
@@ -459,6 +480,7 @@ class Analyze():
     def run(self):
         """Run a by-segment HDX prediction and optionally compares to experiment"""
 
+        self.pf_byframe = np.nan_to_num(self.pf_byframe)
         self.read_segfile()
         self.check_blocksize()
         self.propagate_errors()
@@ -467,6 +489,22 @@ class Analyze():
             self.read_expfile()
             self.desc_stats()
         return self # For consistency with pickle
+
+
+### Analysis object for multiple runs
+class MultiAnalyze():
+    """Class to contain results and analysis methods for HDX predictions"""
+
+    def __init__(self, filenames):
+        """Initialise a MultiAnalyze object from multiple individual
+           Analyze objects. All results are taken as the arithmetic mean
+           across the objects, with uncertainties taken as the corresponding
+           std. err. / std. dev."""
+
+        objects = [ pickle.load(open(fn, 'rb')) for fn in filenames ] 
+        summed_objs = sum(objects[1:], objects[0]) # Checks for object type & equivalence of rates/residxs
+        to_average = [ '' ]
+
 
 ### Plotting Class
 class Plots():
@@ -586,8 +624,13 @@ class Plots():
         def _plot_df_curve(ax, segdata, blockdata, overlay_ys=None, **plot_opts):
             xs, ys = self.results.params['times'], segdata[2:]
             ax.plot(xs, ys, marker='o', color='black', linewidth=1.5, linestyle='-', label="Predicted", **plot_opts)
-            segmaxs = ys + np.std(blockdata[:,0], axis=0, ddof=1)
-            segmins = ys - np.std(blockdata[:,0], axis=0, ddof=1)
+            with np.errstate(all='raise'): # frames length 1 for PH
+                try:
+                    segmaxs = ys + np.std(blockdata[:,0], axis=0, ddof=1)
+                    segmins = ys - np.std(blockdata[:,0], axis=0, ddof=1)
+                except (FloatingPointError, RuntimeWarning):
+                    segmaxs = ys + np.std(blockdata[:,0], axis=0) # 0.0 std dev
+                    segmins = ys - np.std(blockdata[:,0], axis=0) # 0.0 std dev
             ax.fill_between(xs, segmaxs, segmins, color='gray', alpha=0.3, label="Std. Dev. across trajectory blocks")
             ax.set_title("Segment %d-%d" % (segdata[0], segdata[1]), fontsize=9)
             ax.set_xlim(0.0 - xs[-1]*0.05, xs[-1] *1.05) # 5% buffers - do this as log?
@@ -605,8 +648,13 @@ class Plots():
         def _plot_log_df_curve(ax, segdata, blockdata, overlay_ys=None, **plot_opts):
             xs, ys = self.results.params['times'], segdata[2:]
             ax.plot(xs, ys, marker='o', color='black', linewidth=1.5, linestyle='-', label="Predicted", **plot_opts)
-            segmaxs = ys + np.std(blockdata[:,0], axis=0, ddof=1)
-            segmins = ys - np.std(blockdata[:,0], axis=0, ddof=1)
+            with np.errstate(all='raise'): # length 1 arrs for PH
+                try:
+                    segmaxs = ys + np.std(blockdata[:,0], axis=0, ddof=1)
+                    segmins = ys - np.std(blockdata[:,0], axis=0, ddof=1)
+                except (FloatingPointError, RuntimeWarning):
+                    segmaxs = ys + np.std(blockdata[:,0], axis=0) # 0.0 std dev
+                    segmins = ys - np.std(blockdata[:,0], axis=0) # 0.0 std dev
             ax.fill_between(xs, segmaxs, segmins, color='gray', alpha=0.3, label="Std. Dev. across trajectory blocks")
             ax.set_title("Segment %d-%d" % (segdata[0], segdata[1]), fontsize=9)
             ax.set_ylim(-0.05, 1.05)
@@ -674,7 +722,7 @@ class Plots():
 
             return fig1, fig2
 
-        with PdfPages("df_curves.pdf") as pdf:
+        with PdfPages(self.results.params['outprefix']+"df_curves.pdf") as pdf:
             pages = int(len(self.results.c_segfracs[-1]) / 12) + 1 # Ceiling
             logfigs = []
             try:
@@ -720,7 +768,7 @@ class Plots():
             ax.legend(loc='upper center')
             return fig
                 
-        with PdfPages("df_convergence.pdf") as pdf:
+        with PdfPages(self.results.params['outprefix']+"df_convergence.pdf") as pdf:
             for i, currseg in enumerate(self.results.segres):
                 currfig = _plot_df_convergence(self.results.segfracs[:,i,:], \
                                                self.results.c_segfracs[:,i,:], \
@@ -762,9 +810,14 @@ class Plots():
             xs = range(1,len(seglist)+1)
             segmaxs, segmins = np.zeros(seg_fracs.shape[1]), np.zeros(seg_fracs.shape[1])
             # Optional +/- std dev
-            for segidx in range(len(segmaxs)):
-                segmaxs[segidx] = np.std(seg_fracs[:, segidx], ddof=1) # Pop std. dev.
-                segmins[segidx] = -1 * np.std(seg_fracs[:, segidx], ddof=1) # Pop std. dev.
+            with np.errstate(all='raise'):
+                for segidx in range(len(segmaxs)):
+                    try:
+                        segmaxs[segidx] = np.std(seg_fracs[:, segidx], ddof=1) # Pop std. dev.
+                        segmins[segidx] = -1 * np.std(seg_fracs[:, segidx], ddof=1) # Pop std. dev.
+                    except (FloatingPointError, RuntimeWarning):
+                        segmaxs[segidx] = np.std(seg_fracs[:, segidx]) # 0.0 std. dev.
+                        segmins[segidx] = -1 * np.std(seg_fracs[:, segidx]) # 0.0 std. dev.
             segmaxs += cumul_fracs
             segmins += cumul_fracs
             ax.fill_between(xs, segmaxs, segmins, color='gray', alpha=0.3, label="Std. Dev. across trajectory blocks")
@@ -789,7 +842,7 @@ class Plots():
             fig.tight_layout(rect=[0,0,1,0.95])
             return fig
                     
-        with PdfPages("seg_curves.pdf") as pdf:
+        with PdfPages(self.results.params['outprefix']+"seg_curves.pdf") as pdf:
             # Single timepoint plots
             for timeidx, t in enumerate(self.results.params['times']):
                 fig = plt.figure(figsize=(11, 8.5))
@@ -824,7 +877,7 @@ class Plots():
            
            Plots are saved to a multi-page PDF file pf_byres.pdf""" 
 
-        with PdfPages("pf_byres.pdf") as pdf:
+        with PdfPages(self.results.params['outprefix']+"pf_byres.pdf") as pdf:
             # Raw PFs
             fig = plt.figure(figsize=(11, 8.5)) # Letter
             ax = fig.gca()
@@ -873,7 +926,7 @@ class Plots():
             miny = np.floor(minpf/10**minexp) * 10**minexp
             return miny, maxy
 
-        with PdfPages("tot_pf.pdf") as pdf:
+        with PdfPages(self.results.params['outprefix']+"tot_pf.pdf") as pdf:
             # Raw PFs
             startframe, tots = 0, np.zeros(len(self.results.n_frames))
             for i, endframe in enumerate(self.results.c_n_frames):
@@ -932,7 +985,7 @@ class Plots():
            
            Plots are saved to a multi-page PDF file pf_error.pdf""" 
 
-        with PdfPages("pf_error.pdf") as pdf:
+        with PdfPages(self.results.params['outprefix']+"pf_error.pdf") as pdf:
             fig = plt.figure(figsize=(11, 8.5)) # Letter
             ax = fig.gca()
             xs, ys = self.results.tot_SEMs[:,0], self.results.tot_SEMs[:,1]

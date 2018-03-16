@@ -9,6 +9,7 @@ import mdtraj as md
 import numpy as np
 import pickle
 
+
 # Exception for HDX
 class HDX_Error(Exception):
     """Exception in HDX module"""
@@ -162,9 +163,9 @@ def extract_HN(traj, prolines=None, atomselect="(name H or name HN)", log="HDX_a
 def cacheobj(cachefn=None):
     def pickle_decorator(func):
         def pickle_wrapped_func(*args,**kwargs):
-            fn = kwargs.pop('cachefn')
-
             try:
+                fn = args[0].params['outprefix'] + kwargs.pop('cachefn')
+
                 cached_obj = pickle.load(open(fn,'rb'))
                 try:
                     # args[0] is 'self' for class methods
@@ -174,7 +175,7 @@ def cacheobj(cachefn=None):
                     print("Read cache from file %s\n" % fn)
                 return cached_obj
 
-            except (IOError, EOFError, TypeError):
+            except (KeyError, IOError, EOFError, TypeError):
                 new_obj = func(*args, **kwargs)
             pickle.dump(args[0], open(fn,'wb'), protocol=-1) # Highest protocol for size purposes
             try:
