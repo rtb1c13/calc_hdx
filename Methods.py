@@ -157,7 +157,13 @@ class Radou(DfPred.DfPredictor):
                   }
 
         if self.params['skip_first']:
-            donors = donors[1:] # Remove first atom/residue from list
+            for firstres in [ c.residue(0) for c in self.top.chains ]:
+                seltxt = "(name H or name HN) and resid %s" % firstres.index
+                hn_idx = self.top.select(seltxt)
+                try:
+                    donors = donors[donors != hn_idx] # Remove matching atom from list
+                except IndexError:                    # Empty array, no HN in first residue
+                    pass
 
         try:
             total_counts = np.zeros((len(donors), self.t.n_frames))
@@ -187,7 +193,11 @@ class Radou(DfPred.DfPredictor):
         is_heavy = lambda _: self.top.atom(_).element.symbol is not 'H'
 
         if self.params['skip_first']:
-            reslist.pop(0) # Remove first atom/residue from list
+            for firstres in [ c.residue(0) for c in self.top.chains ]:
+                try:
+                    reslist.remove(firstres.index) # Remove matching residue from list
+                except ValueError:            # Empty array, no matching resid of first residue
+                    pass
 
         contact_count = np.zeros((len(reslist), self.t.n_frames))
         for idx, res in enumerate(reslist):

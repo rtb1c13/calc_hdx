@@ -6,7 +6,7 @@ from __future__ import division
 # 
 import mdtraj as md
 import numpy as np
-import os, glob, itertools, pickle
+import os, glob, itertools, pickle, warnings
 import Functions
 
 
@@ -307,7 +307,15 @@ class DfPredictor(object):
 
 
      # Adjust residue names for: Cis-Pro, HIP, cystine bridges, GLH/ASH
-        reslist = np.insert(self.reslist,0,self.reslist[0]-1) # Insert 'prev' residue for first index
+        reslist = self.reslist.copy()
+        for c in self.top.chains:
+            firstres = c.residue(0).index
+            secres = c.residue(1).index
+            try:
+                insert_idx = reslist.tolist().index(secres)
+                reslist = np.insert(reslist, insert_idx, firstres) # Insert 'prev' residue for first index of each chain, as we need to define these as NT
+            except ValueError:
+                pass
         oldnames = {}
         for i in reslist:
             curr = self.top.residue(i)
@@ -375,8 +383,14 @@ class DfPredictor(object):
             except AttributeError:
                 pass
 
-
-        reslist = np.delete(reslist, 0) # Remove i-1 residue we inserted above
+        for c in self.top.chains:
+            firstres = c.residue(0).index
+            try:
+                del_idx = reslist.tolist().index(firstres)
+                reslist = np.delete(reslist, del_idx) # Remove 'prev' residue we inserted above
+            except (ValueError, IndexError): # Not in list or no index in array
+                pass
+        
         try:
             if np.array_equal(reslist, self.reslist):
                 pass
@@ -451,10 +465,11 @@ class DfPredictor(object):
             fracs = np.zeros((len(self.reslist), 1, 2))
         for i2, t in enumerate(self.params['times']):
             def _residue_fraction(pf, k, time=t):
-                f = np.exp(-k / pf[0] * time)
-                val = 1 - f
+                logf = -k / pf[0] * time
+                val = 1 - np.exp(logf)
                 err = (pf[1]/pf[0]) * k/pf[0] # sd(bA^-1) = rel_sd(A) * A^-1 * b
-                err = f * err * time          # sd(e^Aa) = f * sd(A) * a 
+                logerr = logf + np.log(err) + np.log(time) # sd(e^Aa) = f * sd(A) * a
+                err = np.exp(logerr)          # Avoid underflow 
                 return np.asarray([val, err])
             for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, curr_pfs, self.rates)):
                 fracs[i1,i2,:] = curr_frac
