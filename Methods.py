@@ -6,7 +6,7 @@ from __future__ import division
 # 
 import mdtraj as md
 import numpy as np
-import os, glob, itertools
+import os, glob, itertools, copy
 import Functions, DfPred
 
 
@@ -43,18 +43,19 @@ class Radou(DfPred.DfPredictor):
     def __add__(self, other):
         """Sum results in other method object to this one, weighted by number of frames in each"""
         if isinstance(other, Radou):
+            new = copy.deepcopy(self)
             try:
-                if np.array_equal(self.rates, other.rates):
-                    self.pfs[:,0] = (self.n_frames * self.pfs[:,0]) + (other.n_frames * other.pfs[:,0])
+                if np.array_equal(new.rates, other.rates):
+                    new.pfs[:,0] = (self.n_frames * self.pfs[:,0]) + (other.n_frames * other.pfs[:,0])
                     # SD = sqrt((a^2 * var(A)) + (b^2 * var(B)))
-                    self.pfs[:,1] = np.sqrt((self.n_frames**2 * self.pfs[:,1]**2) + (other.n_frames**2 * other.pfs[:,1]**2))
-                    self.n_frames += other.n_frames
-                    self.pfs[:,0] /= self.n_frames
+                    new.pfs[:,1] = np.sqrt((self.n_frames**2 * self.pfs[:,1]**2) + (other.n_frames**2 * other.pfs[:,1]**2))
+                    new.n_frames += other.n_frames
+                    new.pfs[:,0] /= self.n_frames
                     # SD = sd(A)/a
-                    self.pfs[:,1] /= self.n_frames
-                    self.pf_byframe = np.concatenate((self.pf_byframe, other.pf_byframe), axis=1)
-                    self.resfracs = self.dfrac(write=False)
-                    return self
+                    new.pfs[:,1] /= self.n_frames
+                    new.pf_byframe = np.concatenate((self.pf_byframe, other.pf_byframe), axis=1)
+                    new.resfracs = self.dfrac(write=False)
+                    return new
                 else:
                     raise Functions.HDX_Error("Cannot sum two method objects with different intrinsic rates.")
             except AttributeError:
@@ -321,14 +322,15 @@ class PH(DfPred.DfPredictor):
     def __add__(self, other):
         """Sum results in other method object to this one, weighted by number of frames in each"""
         if isinstance(other, PH):
+            new = copy.deepcopy(self)
             try:
-                if np.array_equal(self.rates, other.rates):
-                    self.n_frames += other.n_frames
-                    self.watcontacts = np.concatenate((self.watcontacts, other.watcontacts), axis=1)
-                    self.pf_byframe = np.concatenate((self.pf_byframe, other.pf_byframe), axis=1)
-                    self.PF(update_only=True)
-                    self.resfracs = self.dfrac(write=False)
-                    return self
+                if np.array_equal(new.rates, other.rates):
+                    new.n_frames += other.n_frames
+                    new.watcontacts = np.concatenate((self.watcontacts, other.watcontacts), axis=1)
+                    new.pf_byframe = np.concatenate((self.pf_byframe, other.pf_byframe), axis=1)
+                    new.PF(update_only=True)
+                    new.resfracs = new.dfrac(write=False)
+                    return new
                 else:
                     raise Functions.HDX_Error("Cannot sum two method objects with different intrinsic rates.")
             except AttributeError:
