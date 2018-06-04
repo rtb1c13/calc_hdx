@@ -4,6 +4,9 @@
 
 import Functions
 import numpy as np
+### Remove next two for interactive node
+import matplotlib
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import os, glob, copy, itertools, pickle
 from scipy.stats import pearsonr as correl
@@ -274,13 +277,24 @@ class Analyze():
         if self.params['skip_first']:
             for i1, (seg, chain) in enumerate(self.segres):
                 with open(self.params['logfile'], 'a') as f:
-                    f.write("'Skip_first' is set. Not including residue %s in averaging for segment %s-%s, chain idx %s.\n" \
-                            % (top.residue(res2idx[(seg[0], chain)]), seg[0], seg[1], chain))
+                    try:
+                        f.write("'Skip_first' is set. Not including residue %s in averaging for segment %s-%s, chain idx %s.\n" \
+                                % (top.residue(res2idx[(seg[0], chain)]), seg[0], seg[1], chain))
+                    except KeyError:
+                        _ = top.chain(chain).residue(0)
+                        f.write("'Skip_first' is set. Not including residue %s in averaging for segment %s-%s, chain idx %s.\n" \
+                                % (_, seg[0], seg[1], chain))
+                        
         else:
             for i1, (seg, chain) in enumerate(self.segres):
                 with open(self.params['logfile'], 'a') as f:
-                    f.write("'Skip_first' is NOT set. Including residue %s in averaging for segment %s-%s, chain idx %s.\n" \
-                            % (top.residue(res2idx[(seg[0], chain)]), seg[0], seg[1], chain))
+                    try:
+                        f.write("'Skip_first' is NOT set. Including residue %s in averaging for segment %s-%s, chain idx %s.\n" \
+                                % (top.residue(res2idx[(seg[0], chain)]), seg[0], seg[1], chain))
+                    except KeyError:
+                        _ = top.chain(chain).residue(0)
+                        f.write("'Skip_first' is NOT set. Including residue %s in averaging for segment %s-%s, chain idx %s.\n" \
+                                % (_, seg[0], seg[1], chain))
 
         # Calc average fractions for each chunk                    
         for i0, chunk, errchunk in zip(range(len(self.resfracs)), self.resfracs, self.resfrac_STDs):
