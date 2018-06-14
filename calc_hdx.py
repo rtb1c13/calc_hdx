@@ -201,5 +201,6 @@ if __name__ == '__main__':
             plots.run()
     else:
         analysis = analysis.run(cachefn='analysis.pkl')
+        analysis.print_summaries()
         plots = Analysis.Plots(analysis)
         plots.run()
