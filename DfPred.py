@@ -179,12 +179,15 @@ class DfPredictor(object):
         """Assigns cis-proline residues on a by-frame basis"""
 
         prolines = Functions.list_prolines(self.t, log=self.params['logfile'])
-        outidxs, outangs = self.pro_omega_indices(prolines)
-        for i, proidx in enumerate(prolines[:,1]):
-            self.top.residue(proidx).cis_byframe = np.logical_and(outangs < np.pi/2, outangs > -1*np.pi/2)[:,i]
-            if np.max(self.top.residue(proidx).cis_byframe) > 0:
-                with open(self.params['logfile'], 'a') as f:
-                    f.write("Cis-proline found at frame %d for residue %s!\n" % (np.argmax(self.top.residue(proidx).cis_byframe) + 1, self.top.residue(proidx).resSeq))
+        if prolines is None:
+            pass
+        else:
+            outidxs, outangs = self.pro_omega_indices(prolines)
+            for i, proidx in enumerate(prolines[:,1]):
+                self.top.residue(proidx).cis_byframe = np.logical_and(outangs < np.pi/2, outangs > -1*np.pi/2)[:,i]
+                if np.max(self.top.residue(proidx).cis_byframe) > 0:
+                    with open(self.params['logfile'], 'a') as f:
+                        f.write("Cis-proline found at frame %d for residue %s!\n" % (np.argmax(self.top.residue(proidx).cis_byframe) + 1, self.top.residue(proidx).resSeq))
 
     def assign_disulfide(self):
         """Assigns residues involved in disulfide bridges"""

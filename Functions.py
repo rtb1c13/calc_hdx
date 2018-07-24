@@ -106,10 +106,15 @@ def list_prolines(traj, log="HDX_analysis.log"):
        Returns: Numpy array of [[Proline_ID, Proline_index]]"""
     prolist = [ r.resSeq for r in traj.topology.residues if r.name=='PRO' ]
     proidx = [ r.index for r in traj.topology.residues if r.name=='PRO' ]
-    with open(log, 'a') as f:
-        f.write("Prolines identified at resid:\n"+ \
-                "%s\n" % ' '.join(str(i) for i in prolist))
-    return np.asarray(zip(prolist, proidx))
+    if len(prolist) > 0:
+        with open(log, 'a') as f:
+            f.write("Prolines identified at resid:\n"+ \
+                    "%s\n" % ' '.join(str(i) for i in prolist))
+        return np.asarray(zip(prolist, proidx))
+    else:
+        with open(log, 'a') as f:
+            f.write("No prolines found in topology.\n")
+        return None
 
 
 def select_residxs(traj, reslist, protonly=True, invert=False):

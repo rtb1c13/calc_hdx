@@ -312,7 +312,10 @@ class Radou(DfPred.DfPredictor):
         hn_atms = Functions.extract_HN(self.t, log=self.params['logfile'])
         prolines = Functions.list_prolines(self.t, log=self.params['logfile'])
         # Check all hn_atoms are from protein residues except prolines
-        reslist = [ self.top.atom(a).residue.index for a in hn_atms if self.top.atom(a).residue.is_protein and self.top.atom(a).residue.index not in prolines[:,1] ]
+        if prolines is not None:
+            reslist = [ self.top.atom(a).residue.index for a in hn_atms if self.top.atom(a).residue.is_protein and self.top.atom(a).residue.index not in prolines[:,1] ]
+        else:
+            reslist = [ self.top.atom(a).residue.index for a in hn_atms if self.top.atom(a).residue.is_protein ]
 
         # Calc Nc/Nh
         hres, hbonds = self.calc_hbonds(hn_atms)
@@ -443,7 +446,10 @@ class PH(DfPred.DfPredictor):
             hn_atms = Functions.extract_HN(self.t, log=self.params['logfile'])
             prolines = Functions.list_prolines(self.t, log=self.params['logfile'])
             # Check all hn_atoms are from protein residues except prolines
-            protlist = np.asarray([ self.top.atom(a).residue.index for a in hn_atms if self.top.atom(a).residue.is_protein and self.top.atom(a).residue.index not in prolines[:,1] ])
+            if prolines is not None:
+                protlist = np.asarray([ self.top.atom(a).residue.index for a in hn_atms if self.top.atom(a).residue.is_protein and self.top.atom(a).residue.index not in prolines[:,1] ])
+            else:
+                protlist = np.asarray([ self.top.atom(a).residue.index for a in hn_atms if self.top.atom(a).residue.is_protein ])
 
             self.reslist, self.watcontacts = self.calc_wat_contacts(hn_atms)
             if self.params['skip_first']:
