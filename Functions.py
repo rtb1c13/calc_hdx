@@ -160,6 +160,29 @@ def extract_HN(traj, prolines=None, atomselect="(name H or name HN)", log="HDX_a
                     "%s\n" % '\n'.join(atm2res(i) for i in traj.topology.select(atomselect))) 
         return traj.topology.select(atomselect)
 
+### Switching functions for contacts etc. calculation
+### 'Sigmoid': y = 1 / [ 1 + exp( -k * (x - d0) ) ]
+def sigmoid(x, k=1, d0=0):
+    denom = 1 + np.exp( k * (x - d0) )
+    return 2/denom # Height 2 as d0 = midpoint of sigmoid
+
+### 'Rational_6_12': y = [ 1 - ( (x - d0) / x0 ) ** n ] / [ 1 - ( (x - d0) / x0 ) ** m ]
+def rational_6_12(x, k, d0=0, n=6, m=12):
+    num = 1 - ( (x-d0) / k ) ** n
+    denom = 1 - ( (x-d0) / k ) ** m
+    return num/denom
+
+### 'Exponential': y = exp( -( x - d0 ) / x0 )
+def exponential(x, k, d0=0):
+    return np.exp( -(x-d0) / k )
+
+### 'Gaussian': y = exp( -( x - d0 )**2 / 2*x0**2 )
+def gaussian(x, k, d0=0):
+    num = -1 * (x - d0)**2
+    denom = 2 * k**2
+    return np.exp( num / denom )
+
+### Pickling
 def cacheobj(cachefn=None):
     def pickle_decorator(func):
         def pickle_wrapped_func(*args,**kwargs):

@@ -27,6 +27,10 @@ class Radou(DfPred.DfPredictor):
            See self.params for default values"""
         # Initialise main parameters with defaults
         radouparams = { 'hbond_method' : 'contacts',
+                        'contact_method' : 'cutoff',
+                        'switch_method' : 'rational_6_12',
+                        'switch_scale' : 1.0,
+                        'switch_width' : 0.25,
                         'cut_Nc' : 0.65,
                         'cut_Nh' : 0.24,
                         'bh_dist' : 0.25,
@@ -63,11 +67,11 @@ class Radou(DfPred.DfPredictor):
         else:
             return self
 
-    def calc_contacts(self, qidx, cidx, cutoff):
-        """Calculates contacts between 'query' and 'contact' atom selections
-           within a specified cutoff (in nm).
+    def _calc_contacts_cutoff(self, qidx, cidx, cutoff):
+        """Calculate contacts between 'query' and 'contact' atom selections
+           within a specified hard cutoff (in nm).
            Periodicity is included in MDtraj function by default.
-           Usage: calc_contacts(qidx, cidx, cutoff).
+           Usage: _calc_contacts_cutoff(qidx, cidx, cutoff).
 
            Qidx and cidx are the atom index lists to search for contacts from
            and to respectively (e.g. from amide NH to all heavy atoms).
@@ -81,6 +85,79 @@ class Radou(DfPred.DfPredictor):
             qidx = np.array([qidx])
             byframe_ctacts = md.compute_neighbors(self.t, cutoff, qidx, haystack_indices=cidx)
         return map(lambda x: len(x), byframe_ctacts)
+
+    def _calc_contacts_switch(self, qidx, cidx, cutoff):
+        """Calculate contacts between 'query' and 'contact' atom selections
+           within a specified cutoff (in nm), with contacts scaled by a
+           switching function beyond that cutoff.
+
+           Periodicity is included in MDtraj function by default.
+           Usage: _calc_contacts_switch(qidx, cidx, cutoff).
+
+           Qidx and cidx are the atom index lists to search for contacts from
+           and to respectively (e.g. from amide NH to all heavy atoms).
+
+           Options for switching function are defined in Radou.params. Current options:
+           'switch_method' [rational_6_12, sigmoid, exponential, gaussian] : form of switching function
+           'switch_scale' : Scaling of switching function (default 1.0), see Functions.py for equations
+           'cut_Nc' : Cutoff after which contacts switching starts. r > cut_Nc, count < 1.0
+           'switch_width' : Width of switching. r > cut_Nc + switch_width, count == 0.0
+
+           Returns count of contacts for each frame in trajectory Radou.t."""
+
+        smethods = {
+                    'rational_6_12' : Functions.rational_6_12,
+                    'sigmoid' : Functions.sigmoid,
+                    'exponential' : Functions.exponential,
+                    'gaussian' : Functions.gaussian
+                   }
+        do_switch = lambda x: smethods[self.params['switch_method']](x, self.params['switch_scale'], self.params['cut_Nc'])
+
+        # Get count within lowcut
+        try:
+            lowcut_ctacts = md.compute_neighbors(self.t, cutoff, qidx, haystack_indices=cidx)
+        except TypeError:
+            qidx = np.array([qidx])
+            lowcut_ctacts = md.compute_neighbors(self.t, cutoff, qidx, haystack_indices=cidx)
+
+        highcut_ctacts = md.compute_neighbors(self.t, cutoff + self.params['switch_width'], qidx, haystack_indices=cidx)
+
+        # Calculate & add switching function value for contacts between lowcut and highcut. 
+        contact_count = np.asarray(map(lambda y: len(y), lowcut_ctacts))
+        for frameidx, count, lowidxs, highidxs in zip(range(0, self.t.n_frames), contact_count, lowcut_ctacts, highcut_ctacts):
+            betweenidxs = highidxs[np.in1d(highidxs, lowidxs)==False]
+            pairs = np.insert(np.reshape(betweenidxs,(len(betweenidxs),1)), 0, qidx, axis=1) # Insert qidx before each contact to create 2D array of atom pairs
+            currdists = md.compute_distances(self.t[frameidx], pairs)[0] ### TODO expensive because of multiple calls to compute_distances?
+            count += np.sum(map(do_switch, currdists))
+
+        return contact_count
+
+
+    def calc_contacts(self, qidx, cidx, cutoff):
+        """Calculate contacts between 'query' and 'contact' atom selections
+           using a given method defined in Radou.params['contact_method'].
+
+           Current options:
+           'cutoff' : Use a hard cutoff for counting contacts, defined as Radou.params['cut_Nc']
+           'switch' : Use a switching function for counting contacts.
+                      r <= Radou.params['cut_Nc'], count = 1
+                      r > Radou.params['cut_Nc'], 0 < switched_count < 1
+
+           Options for the switching function should be defined in the 'Radou.params'
+           dictionary.
+
+           Qidx and cidx are the atom index lists to search for contacts from
+           and to respectively (e.g. from amide NH to all heavy atoms).
+
+           Returns count of contacts for each frame in trajectory Radou.t."""
+
+        # Switch for contacts methods
+        cmethods = {
+                    'cutoff' : self._calc_contacts_cutoff,
+                    'switch' : self._calc_contacts_switch
+                   }
+
+        return cmethods[self.params['contact_method']](qidx, cidx, cutoff)
 
     def _calc_hbonds_contacts(self, HN):
         """Calculates number of protein H-bonds for a particular atom index
@@ -152,10 +229,10 @@ class Radou(DfPred.DfPredictor):
            Returns: n_donors * n_frames 2D array of H-bond counts per frame for all donors"""
 
     # Switch for H-bond methods
-        methods = {
-                   'contacts' : self._calc_hbonds_contacts,
-                   'bh' : self._calc_hbonds_bh
-                  }
+        hmethods = {
+                    'contacts' : self._calc_hbonds_contacts,
+                    'bh' : self._calc_hbonds_bh
+                   }
 
         if self.params['skip_first']:
             for firstres in [ c.residue(0) for c in self.top.chains ]:
@@ -171,7 +248,7 @@ class Radou(DfPred.DfPredictor):
         except TypeError:
             total_counts = np.zeros((1, self.t.n_frames))
         for i, v in enumerate(donors):
-            total_counts[i] = methods[self.params['hbond_method']](v)
+            total_counts[i] = hmethods[self.params['hbond_method']](v)
 
         reslist = [ self.top.atom(a).residue.index for a in donors ]
 #        hbonds = np.concatenate((np.asarray([reslist]).reshape(len(reslist),1), total_counts), axis=1) # Array of [[ Res idx, Contact count ]]
