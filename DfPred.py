@@ -322,7 +322,7 @@ class DfPredictor(object):
         reslist = self.reslist.copy()
         for c in self.top.chains:
             firstres = c.residue(0).index
-            secres = c.residue(1).index
+            secres = next(r.index for r in c._residues[1:] if r.name != 'PRO')
             try:
                 insert_idx = reslist.tolist().index(secres)
                 reslist = np.insert(reslist, insert_idx, firstres) # Insert 'prev' residue for first index of each chain, as we need to define these as NT
@@ -413,7 +413,12 @@ class DfPredictor(object):
             return
         for i, r in enumerate(reslist):
             curr = self.top.residue(r)
-            prev = self.top.residue(r-1)
+            if r != 0:
+                prev = self.top.residue(r-1)
+            else:
+                prev = curr
+                kints[i] = np.inf
+                continue
             # check for cispro
             if prev.name == 'PROC':
                 with open(self.params['logfile'], 'a') as f:
@@ -430,8 +435,8 @@ class DfPredictor(object):
                 curr_adjs.extend(self.params['_reordered_kint_adjs'][prev.name][2:4])
                 kints[i] = self._adj_to_rates(curr_adjs)
 
-            rids = np.asarray([ self.top.residue(i).resSeq for i in reslist ])
-            # Save Kints to separate log file, appending filenames for trajectories read as chunks
+        rids = np.asarray([ self.top.residue(i).resSeq for i in reslist ])
+        # Save Kints to separate log file, appending filenames for trajectories read as chunks
         if os.path.exists(self.params['outprefix']+"Intrinsic_rates.dat"):
             filenum = len(glob.glob(self.params['outprefix']+"Intrinsic_rates*"))
             np.savetxt(self.params['outprefix']+"Intrinsic_rates_chunk_%d.dat" % (filenum+1), \
