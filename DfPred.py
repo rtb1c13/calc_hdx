@@ -192,16 +192,25 @@ class DfPredictor(object):
     def assign_disulfide(self):
         """Assigns residues involved in disulfide bridges"""
 
-        # This selection syntax & assignment is untested
-        sg = self.top.select('name SG and resname CYS or resname CYX')
-        try:
-            sg_coords = self.t.atom_slice(sg).xyz
-        except IndexError: # Catch empty sg
+        # This assignment is what MDtraj uses for cyx detection 
+        def isCyx(res):
+            names = [atom.name for atom in res._atoms]
+            return 'SG' in names and 'HG' not in names
+
+        cyx = [res for res in self.top.residues
+               if res.name == 'CYS' and isCyx(res)]
+
+        if len(cyx) > 0:
+            sg_coords = self.t.xyz[0]
+        else: # Catch empty cyx
             with open(self.params['logfile'], 'a') as f:
-                f.write("No cysteines found in topology.\n")
+                f.write("No oxidised cysteines (CYX) found in topology.\n")
             return
+        
         self.top.create_standard_bonds()
+        self.top._bonds = list(set(self.top._bonds)) # remove duplicates
         self.top.create_disulfide_bonds(sg_coords)
+
         # Assign disulfides (identical for each frame)
         for b in self.top._bonds:
             if all(i.element.symbol == 'S' for i in b):
@@ -371,7 +380,7 @@ class DfPredictor(object):
                 if np.max(curr.cterm): # If cterm is true for any frame
                     oldnames[i] = curr.name
                     try:
-                        if curr.atom('O').n_bonds > 1 or curr.atom('OXT').n_bonds > 1:
+                        if (curr.atom('O').n_bonds > 1 or curr.atom('OXT').n_bonds > 1):
                             curr.name = 'CTH'
                             with open(self.params['logfile'], 'a') as f:
                                 f.write("It looks like you have a neutral C-terminus (COOH) at residue %s?\n" % curr)
