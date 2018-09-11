@@ -238,10 +238,10 @@ class Radou(DfPred.DfPredictor):
             for firstres in [ c.residue(0) for c in self.top.chains ]:
                 seltxt = "(name H or name HN) and resid %s" % firstres.index
                 hn_idx = self.top.select(seltxt)
-                try:
-                    donors = donors[donors != hn_idx] # Remove matching atom from list
-                except IndexError:                    # Empty array, no HN in first residue
+                if hn_idx.shape == (0,): # Empty array, no HN in first residue
                     pass
+                else:
+                    donors = donors[donors != hn_idx] # Remove matching atom from list
 
         try:
             total_counts = np.zeros((len(donors), self.t.n_frames))
