@@ -33,7 +33,7 @@ def parse():
     parser.add_argument("-seg","--segfile",help="Name of file with segment definitions for analysis. Segments should be defined one per line, with starting/finishing residues whitespace separated. Defaults to 'segfile.txt'",type=str, default='segfile.txt')
     parser.add_argument("-exp","--expfile",help="Name of file with experimental deuterated fractions. Segments should be identical to those in segfile, defined one per line, followed by one column for each timepoint in --times. Whitespace separated. No default.")
     parser.add_argument("-out","--outprefix",help="Prefix for prediction output files",type=str, default='')
-    parser.add_argument("-mopt","--method_options",help="Additional method options. Should be provided as a single string in Python dictionary format, e.g.:  '{ 'hbond_method' : 'contacts', 'cut_Nc' : 0.70, 'save_contacts' : True }' (Note the string must be enclosed in quotes)",type=str)
+    parser.add_argument("-mopt","--method_options",help="Additional method options. Should be provided as a single string in Python dictionary format, e.g.:  '{ 'hbond_method' : 'contacts', 'cut_Nc' : 0.70, 'save_detailed' : True }' (Note the string must be enclosed in quotes)",type=str)
     parser.add_argument("-aopt","--analysis_options",help="Additional analysis options. Should be provided as a single string in Python dictionary format, e.g.:  '{ 'figs' : True }' (Note the string must be enclosed in quotes)",type=str)
 
     if len(sys.argv)==1:
