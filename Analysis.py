@@ -42,9 +42,12 @@ class Analyze():
             self.c_resfracs = np.copy(self.resfracs)
             # Byframe PFs = 2D-array[residue, PFs]
             self.pf_byframe = np.copy(resobj.pf_byframe)
+            self.lnpf_byframe = np.copy(resobj.lnpf_byframe)
             # Cumulative PFs = 2D-array[chunk, PFs]
             self.pfs = np.reshape(resobj.pfs[:,0], (1, len(resobj.pfs)))
+            self.lnpfs = np.reshape(resobj.lnpfs[:,0], (1, len(resobj.lnpfs)))
             self.c_pfs = np.copy(self.pfs)
+            self.c_lnpfs = np.copy(self.lnpfs)
             # Cumulative n_frames = 1D-array[n_frames]
             self.n_frames = np.atleast_1d(resobj.n_frames)
             self.c_n_frames = np.copy(self.n_frames)
@@ -85,6 +88,16 @@ class Analyze():
                 new.c_pfs = np.cumsum(_, axis=0)
                 for tot_frames, tot_pf in zip(new.c_n_frames, new.c_pfs):
                     tot_pf /= tot_frames
+
+                # Calc running ave of ln(PFs) = 2D-array[chunk, ln(PFs)]
+                new.lnpf_byframe = np.concatenate((new.lnpf_byframe, other.lnpf_byframe), axis=1)
+                new.lnpfs = np.concatenate((new.lnpfs, other.lnpfs), axis=0)
+                _ = np.copy(new.lnpfs)
+                for frames, curr_lnpf in zip(new.n_frames, _):
+                    curr_lnpf *= frames
+                new.c_lnpfs = np.cumsum(_, axis=0)
+                for tot_frames, tot_lnpf in zip(new.c_n_frames, new.c_lnpfs):
+                    tot_lnpf /= tot_frames
             
                 # Calc running ave of resfracs = 3D-array[chunk, resfrac, time]
                 new.resfracs = np.concatenate((new.resfracs, other.resfracs), axis=0)
@@ -493,6 +506,19 @@ class Analyze():
         except AttributeError:
             raise Functions.HDX_Error("Can't write summary protection factors - perhaps you haven't calculated them yet?")
 
+        # Save log(PFs) to 'SUMMARY' file
+        try:
+            if os.path.exists(self.params['outprefix']+"SUMMARY_logProtection_factors.dat"):
+                filenum = len(glob.glob(self.params['outprefix']+"SUMMARY_logProtection_factors*"))
+                np.savetxt(self.params['outprefix']+"SUMMARY_logProtection_factors_%d.dat" % (filenum+1), \
+                           np.stack((self.resnums, self.c_lnpfs[-1]), axis=1), fmt=['%7d','%18.8f'], \
+                           header="ResID  ln(Protection factor)") # Use residue indices internally, print out IDs
+            else:    
+                np.savetxt(self.params['outprefix']+"SUMMARY_logProtection_factors.dat", np.stack((self.resnums, self.c_lnpfs[-1]), axis=1), \
+                           fmt=['%7d','%18.8f'], header="ResID  ln(Protection factor)") # Use residue indices internally, print out IDs
+        except AttributeError:
+            raise Functions.HDX_Error("Can't write summary log protection factors - perhaps you haven't calculated them yet?")
+
         # Save residue deuterated fractions to 'SUMMARY' file
         try:
             if os.path.exists(self.params['outprefix']+"SUMMARY_residue_fractions.dat"):
@@ -549,6 +575,8 @@ class Analyze():
         """Run a by-segment HDX prediction and optionally compares to experiment"""
 
         self.pf_byframe = np.nan_to_num(self.pf_byframe)
+        self.lnpf_byframe = np.nan_to_num(self.lnpf_byframe)
+#        self.resfracs = self.resobj.dfrac(write=True, use_self=False, alternate_pfs=np.stack((np.exp(np.mean(self.lnpf_byframe, axis=1)), np.exp(np.std(self.lnpf_byframe, axis=1, ddof=1))), axis=1))
         self.read_segfile()
         self.check_blocksize()
         self.propagate_errors()

@@ -466,7 +466,7 @@ class DfPredictor(object):
            Returns: [n_residues, n_times] 2D numpy array of deuterated fractions"""
 
         if use_self:
-            curr_pfs = self.pfs
+            curr_pfs = np.stack((np.exp(np.mean(self.lnpf_byframe, axis=1)), np.exp(np.std(self.lnpf_byframe, axis=1, ddof=1))), axis=1)
             if len(set(map(len,[self.reslist, self.pfs, self.rates]))) != 1: # Check that all lengths are the same (set length = 1)
                 raise Functions.HDX_Error("Can't calculate deuterated fractions, your residue/protection factor/rates arrays are not the same length.")
         else:

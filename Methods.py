@@ -59,6 +59,14 @@ class Radou(DfPred.DfPredictor):
                     new.pfs[:,1] /= self.n_frames
                     new.pf_byframe = np.concatenate((self.pf_byframe, other.pf_byframe), axis=1)
                     new.resfracs = self.dfrac(write=False)
+                    # Same for log(protection factors)
+                    new.lnpfs[:,0] = (self.n_frames * self.lnpfs[:,0]) + (other.n_frames * other.lnpfs[:,0])
+                    # SD = sqrt((a^2 * var(A)) + (b^2 * var(B)))
+                    new.lnpfs[:,1] = np.sqrt((self.n_frames**2 * self.lnpfs[:,1]**2) + (other.n_frames**2 * other.lnpfs[:,1]**2))
+                    new.lnpfs[:,0] /= self.n_frames
+                    # SD = sd(A)/a
+                    new.lnpfs[:,1] /= self.n_frames
+                    new.lnpf_byframe = np.concatenate((self.lnpf_byframe, other.lnpf_byframe), axis=1)
                     return new
                 else:
                     raise Functions.HDX_Error("Cannot sum two method objects with different intrinsic rates.")
@@ -351,7 +359,21 @@ class Radou(DfPred.DfPredictor):
             np.savetxt(self.params['outprefix']+"Protection_factors.dat", np.concatenate((rids, pf_bar), axis=1), \
                        fmt=['%7d', '%18.8f', '%18.8f'], header="ResID  Protection factor Std. Dev.") # Use residue indices internally, print out IDs
 
-        return hres, pf_bar, pf_byframe
+        # Do same for ln(Pf)
+        lnpf_byframe = hbonds + contacts
+        lnpf_bar = np.mean(lnpf_byframe, axis=1)
+        lnpf_bar = np.stack((lnpf_bar, np.std(lnpf_byframe, axis=1, ddof=1)), axis=1)
+        # Save PFs to separate log file, appending filenames for trajectories read as chunks
+        if os.path.exists(self.params['outprefix']+"logProtection_factors.dat"):
+            filenum = len(glob.glob(self.params['outprefix']+"logProtection_factors*"))
+            np.savetxt(self.params['outprefix']+"logProtection_factors_chunk_%d.dat" % (filenum+1), \
+                       np.concatenate((rids, lnpf_bar), axis=1), fmt=['%7d', '%18.8f', '%18.8f'], \
+                       header="ResID  ln(Protection factor) Std. Dev.") # Use residue indices internally, print out IDs
+        else:    
+            np.savetxt(self.params['outprefix']+"logProtection_factors.dat", np.concatenate((rids, lnpf_bar), axis=1), \
+                       fmt=['%7d', '%18.8f', '%18.8f'], header="ResID  ln(Protection factor) Std. Dev.") # Use residue indices internally, print out IDs
+
+        return hres, pf_bar, pf_byframe, lnpf_bar, lnpf_byframe
 
     @Functions.cacheobj()
     def run(self, trajectory):
@@ -366,7 +388,7 @@ class Radou(DfPred.DfPredictor):
         self.assign_disulfide()
         self.assign_his_protonation()
         self.assign_termini()
-        self.reslist, self.pfs, self.pf_byframe = self.PF()
+        self.reslist, self.pfs, self.pf_byframe, self.lnpfs, self.lnpf_byframe = self.PF()
                                    
         self.rates = self.kint()
         self.resfracs = self.dfrac()
