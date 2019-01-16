@@ -321,13 +321,14 @@ class DfPredictor(object):
      # Adjust residue names for: Cis-Pro, HIP, cystine bridges, GLH/ASH
         reslist = self.reslist.copy()
         for c in self.top.chains:
-            firstres = c.residue(0).index
-            secres = next(r.index for r in c._residues[1:] if r.name != 'PRO')
-            try:
-                insert_idx = reslist.tolist().index(secres)
-                reslist = np.insert(reslist, insert_idx, firstres) # Insert 'prev' residue for first index of each chain, as we need to define these as NT
-            except ValueError:
-                pass
+            if c.n_residues > 1: # Chain of length 1 is probably a ligand - ignore!
+                firstres = c.residue(0).index
+                secres = next(r.index for r in c._residues[1:] if r.name != 'PRO')
+                try:
+                    insert_idx = reslist.tolist().index(secres)
+                    reslist = np.insert(reslist, insert_idx, firstres) # Insert 'prev' residue for first index of each chain, as we need to define these as NT
+                except ValueError:
+                    pass
         oldnames = {}
         for i in reslist:
             curr = self.top.residue(i)
