@@ -46,21 +46,19 @@ class DfPredictor(object):
 
         # Default rate adjustments for adjacent amino acids
         # Each key is a residue name, each value is [ lgAL, lgAR, lgBL, lgBR ]
-        # Values from Bai et al., Proteins, 1993, 17, 75-86
+        # Values from Nguyen et al., J. Am. Soc. Mass Spec., 2018, 29, 1936-1939
 
-        # Note that Englander has adjustments to Glu/Asp rates in spreadsheet
-        # on his website, based on Mori et al., Proteins, 1997, 28, 325-332
-        # These are NOT included here by default
+        # Note that these are the latest, 2018 parameters used on Englander's website
         rate_adjs = { 'ALA': [ 0.00, 0.00, 0.00, 0.00 ],
                       'ARG': [ -0.59, -0.32, 0.08, 0.22 ],
                       'ASN': [ -0.58, -0.13, 0.49, 0.32 ],
-                      'ASP': [ 0.90, 0.58, -0.30, -0.18 ],
+                      'ASP': [ 0.90, 0.58, 0.10, -0.18 ],
                       'ASH': [ -0.90, -0.12, 0.69, 0.60 ], # Protonated ASP        
                       'CYS': [ -0.54, -0.46, 0.62, 0.55 ],
                       'CYS2': [ -0.74, -0.58, 0.55, 0.46 ], # Disulfide         
-                      'GLY': [ -0.22, 0.22, 0.27, 0.17 ],
+                      'GLY': [ -0.22, 0.22, -0.03, 0.17 ],
                       'GLN': [ -0.47, -0.27, 0.06, 0.20 ],
-                      'GLU': [ -0.90, 0.31, -0.51, -0.15 ],
+                      'GLU': [ -0.90, 0.31, -0.11, -0.15 ],
                       'GLH': [ -0.60, -0.27, 0.24, 0.39 ], # Protonated GLU        
                       'HIS': [ 0.00, 0.00, -0.10, 0.14 ],  # Acid rates are N/D, 
                                                            # but at pH where His is deprotonated,
@@ -95,9 +93,9 @@ class DfPredictor(object):
         self.params['_reordered_kint_adjs'] = _reordered_rate_adjs
  
         # Default parameters for ka/kb/kw estimations
-        # Values from Bai et al., Proteins, 1993, 17, 75-86
-        rate_params = { 'lgkAref' : 2.04,
-                        'lgkBref' : 10.36,
+        # Values from Nguyen et al., J. Am. Soc. Mass Spec., 2018, 29, 1936-1939
+        rate_params = { 'lgkAref' : 1.62,
+                        'lgkBref' : 10.18,
                         'lgkWref' : -1.5,
                         'EaA' : 14.,
                         'EaB' : 17.,
