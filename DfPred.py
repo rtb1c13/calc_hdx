@@ -93,9 +93,9 @@ class DfPredictor(object):
         self.params['_reordered_kint_adjs'] = _reordered_rate_adjs
  
         # Default parameters for ka/kb/kw estimations
-        # Values from Nguyen et al., J. Am. Soc. Mass Spec., 2018, 29, 1936-1939
-        rate_params = { 'lgkAref' : 1.62,
-                        'lgkBref' : 10.18,
+        # Values from Bai et al., Proteins, 1993, 17, 75-86
+        rate_params = { 'lgkAref' : 2.04,
+                        'lgkBref' : 10.36,
                         'lgkWref' : -1.5,
                         'EaA' : 14.,
                         'EaB' : 17.,
