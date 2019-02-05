@@ -335,10 +335,10 @@ class Radou(DfPred.DfPredictor):
         # Option to save outputs
         if self.params['save_detailed']:
             for i, residx in enumerate(hres):
-                with open("Hbonds_%d.tmp" % self.top.residue(residx).resSeq, 'ab') as hbond_f:
+                with open("Hbonds_chain_%d_res_%d.tmp" % (self.top.residue(residx).chain.index, self.top.residue(residx).resSeq), 'ab') as hbond_f:
                     np.savetxt(hbond_f, hbonds[i], fmt='%d') # Use residue indices internally, print out IDs
             for i, residx in enumerate(cres):
-                with open("Contacts_%d.tmp" % self.top.residue(residx).resSeq, 'ab') as contacts_f:
+                with open("Contacts_chain_%d_res_%d.tmp" % (self.top.residue(residx).chain.index, self.top.residue(residx).resSeq), 'ab') as contacts_f:
                     np.savetxt(contacts_f, contacts[i], fmt='%d') # Use residue indices internally, print out IDs
         # Calc PF with phenomenological equation
         hbonds *= self.params['betah']     # Beta parameter 1
