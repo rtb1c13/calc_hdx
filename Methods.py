@@ -58,15 +58,11 @@ class Radou(DfPred.DfPredictor):
                     # SD = sd(A)/a
                     new.pfs[:,1] /= self.n_frames
                     new.pf_byframe = np.concatenate((self.pf_byframe, other.pf_byframe), axis=1)
-                    new.resfracs = self.dfrac(write=False)
                     # Same for log(protection factors)
-                    new.lnpfs[:,0] = (self.n_frames * self.lnpfs[:,0]) + (other.n_frames * other.lnpfs[:,0])
-                    # SD = sqrt((a^2 * var(A)) + (b^2 * var(B)))
-                    new.lnpfs[:,1] = np.sqrt((self.n_frames**2 * self.lnpfs[:,1]**2) + (other.n_frames**2 * other.lnpfs[:,1]**2))
-                    new.lnpfs[:,0] /= self.n_frames
-                    # SD = sd(A)/a
-                    new.lnpfs[:,1] /= self.n_frames
                     new.lnpf_byframe = np.concatenate((self.lnpf_byframe, other.lnpf_byframe), axis=1)
+                    new.lnpfs[:,0] = np.mean(new.lnpf_byframe, axis=1)
+                    new.lnpfs[:,1] = np.std(new.lnpf_byframe, axis=1, ddof=1)
+                    new.resfracs = new.dfrac(write=False)
                     return new
                 else:
                     raise Functions.HDX_Error("Cannot sum two method objects with different intrinsic rates.")

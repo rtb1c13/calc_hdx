@@ -89,15 +89,10 @@ class Analyze():
                 for tot_frames, tot_pf in zip(new.c_n_frames, new.c_pfs):
                     tot_pf /= tot_frames
 
-                # Calc running ave of ln(PFs) = 2D-array[chunk, ln(PFs)]
+                # new.c_lnpfs should be calculated from new.lnpf_byframe
                 new.lnpf_byframe = np.concatenate((new.lnpf_byframe, other.lnpf_byframe), axis=1)
                 new.lnpfs = np.concatenate((new.lnpfs, other.lnpfs), axis=0)
-                _ = np.copy(new.lnpfs)
-                for frames, curr_lnpf in zip(new.n_frames, _):
-                    curr_lnpf *= frames
-                new.c_lnpfs = np.cumsum(_, axis=0)
-                for tot_frames, tot_lnpf in zip(new.c_n_frames, new.c_lnpfs):
-                    tot_lnpf /= tot_frames
+                new.c_lnpfs = np.append(new.c_lnpfs, np.mean(new.lnpf_byframe, axis=1)[np.newaxis,:], axis=0)
             
                 # Calc running ave of resfracs = 3D-array[chunk, resfrac, time]
                 new.resfracs = np.concatenate((new.resfracs, other.resfracs), axis=0)
@@ -105,9 +100,9 @@ class Analyze():
                 # Redo resfrac calculation based on running average of pfs
                 # N.B. Due to the exponential this is NOT just an average of the resfrac blocks
                 for i2, t in enumerate(new.params['times']):
-                    def _residue_fraction(pf, k, time=t):
-                        return 1 - np.exp(-k / pf * time)
-                    for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, new.c_pfs[-1], new.rates)):
+                    def _residue_fraction(lnpf, k, time=t):
+                        return 1 - np.exp(-k / np.exp(lnpf) * time)
+                    for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, new.c_lnpfs[-1], new.rates)):
                         _[i1,i2] = curr_frac
                 new.c_resfracs = np.concatenate((new.c_resfracs, \
                                                  np.reshape(_, (1, len(new.residxs), len(new.params['times'])))), \
