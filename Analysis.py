@@ -2,7 +2,7 @@
 
 # Analysis/plotting functions for HDX analysis
 
-import Functions
+import Functions, Methods
 import numpy as np
 ### Remove next two for interactive node
 import matplotlib
@@ -42,12 +42,15 @@ class Analyze():
             self.c_resfracs = np.copy(self.resfracs)
             # Byframe PFs = 2D-array[residue, PFs]
             self.pf_byframe = np.copy(resobj.pf_byframe)
-            self.lnpf_byframe = np.copy(resobj.lnpf_byframe)
+            if type(resobj) is Methods.Radou:
+                self.lnpf_byframe = np.copy(resobj.lnpf_byframe)
             # Cumulative PFs = 2D-array[chunk, PFs]
             self.pfs = np.reshape(resobj.pfs[:,0], (1, len(resobj.pfs)))
-            self.lnpfs = np.reshape(resobj.lnpfs[:,0], (1, len(resobj.lnpfs)))
+            if type(resobj) is Methods.Radou:
+                self.lnpfs = np.reshape(resobj.lnpfs[:,0], (1, len(resobj.lnpfs)))
             self.c_pfs = np.copy(self.pfs)
-            self.c_lnpfs = np.copy(self.lnpfs)
+            if type(resobj) is Methods.Radou:
+                self.c_lnpfs = np.copy(self.lnpfs)
             # Cumulative n_frames = 1D-array[n_frames]
             self.n_frames = np.atleast_1d(resobj.n_frames)
             self.c_n_frames = np.copy(self.n_frames)
@@ -90,20 +93,28 @@ class Analyze():
                     tot_pf /= tot_frames
 
                 # new.c_lnpfs should be calculated from new.lnpf_byframe
-                new.lnpf_byframe = np.concatenate((new.lnpf_byframe, other.lnpf_byframe), axis=1)
-                new.lnpfs = np.concatenate((new.lnpfs, other.lnpfs), axis=0)
-                new.c_lnpfs = np.append(new.c_lnpfs, np.mean(new.lnpf_byframe, axis=1)[np.newaxis,:], axis=0)
+                if type(self.resobj) is Methods.Radou:
+                    new.lnpf_byframe = np.concatenate((new.lnpf_byframe, other.lnpf_byframe), axis=1)
+                    new.lnpfs = np.concatenate((new.lnpfs, other.lnpfs), axis=0)
+                    new.c_lnpfs = np.append(new.c_lnpfs, np.mean(new.lnpf_byframe, axis=1)[np.newaxis,:], axis=0)
             
                 # Calc running ave of resfracs = 3D-array[chunk, resfrac, time]
                 new.resfracs = np.concatenate((new.resfracs, other.resfracs), axis=0)
                 _ = np.zeros(new.resfracs[0].shape)
                 # Redo resfrac calculation based on running average of pfs
                 # N.B. Due to the exponential this is NOT just an average of the resfrac blocks
-                for i2, t in enumerate(new.params['times']):
-                    def _residue_fraction(lnpf, k, time=t):
-                        return 1 - np.exp(-k / np.exp(lnpf) * time)
-                    for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, new.c_lnpfs[-1], new.rates)):
-                        _[i1,i2] = curr_frac
+                if type(self.resobj) is Methods.Radou:
+                    for i2, t in enumerate(new.params['times']):
+                        def _residue_fraction_lnpf(lnpf, k, time=t):
+                            return 1 - np.exp((-k / np.exp(lnpf)) * time)
+                        for i1, curr_frac in enumerate(itertools.imap(_residue_fraction_lnpf, new.c_lnpfs[-1], new.rates)):
+                            _[i1,i2] = curr_frac
+                else:
+                    for i2, t in enumerate(new.params['times']):
+                        def _residue_fraction(pf, k, time=t):
+                            return 1 - np.exp((-k / pf) * time)
+                        for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, new.c_pfs[-1], new.rates)):
+                            _[i1,i2] = curr_frac
                 new.c_resfracs = np.concatenate((new.c_resfracs, \
                                                  np.reshape(_, (1, len(new.residxs), len(new.params['times'])))), \
                                                  axis=0)
@@ -512,7 +523,10 @@ class Analyze():
                 np.savetxt(self.params['outprefix']+"SUMMARY_logProtection_factors.dat", np.stack((self.resnums, self.c_lnpfs[-1]), axis=1), \
                            fmt=['%7d','%18.8f'], header="ResID  ln(Protection factor)") # Use residue indices internally, print out IDs
         except AttributeError:
-            raise Functions.HDX_Error("Can't write summary log protection factors - perhaps you haven't calculated them yet?")
+            if type(self.resobj) is Methods.Radou:
+                raise Functions.HDX_Error("Can't write summary log protection factors - perhaps you haven't calculated them yet?")
+            else:
+                pass
 
         # Save residue deuterated fractions to 'SUMMARY' file
         try:
@@ -570,7 +584,8 @@ class Analyze():
         """Run a by-segment HDX prediction and optionally compares to experiment"""
 
         self.pf_byframe = np.nan_to_num(self.pf_byframe)
-        self.lnpf_byframe = np.nan_to_num(self.lnpf_byframe)
+        if type(self.resobj) is Methods.Radou:
+            self.lnpf_byframe = np.nan_to_num(self.lnpf_byframe)
 #        self.resfracs = self.resobj.dfrac(write=True, use_self=False, alternate_pfs=np.stack((np.exp(np.mean(self.lnpf_byframe, axis=1)), np.exp(np.std(self.lnpf_byframe, axis=1, ddof=1))), axis=1))
         self.read_segfile()
         self.check_blocksize()

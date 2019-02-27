@@ -451,7 +451,7 @@ class PH(DfPred.DfPredictor):
             contacts[idx] = map(len, md.compute_neighbors(self.t, self.params['cut_O'], \
                                            np.asarray([hn]), haystack_indices=solidxs))
             if self.params['save_detailed']:
-                with open("Waters_%d.tmp" % self.top.atom(hn).residue.resSeq, 'ab') as wat_f:
+                with open("Waters_chain_%d_res_%d.tmp" % (self.top.atom(hn).residue.chain.index, self.top.atom(hn).residue.resSeq), 'ab') as wat_f:
                     np.savetxt(wat_f, contacts[idx], fmt='%d')
 
         return np.asarray(reslist), contacts
