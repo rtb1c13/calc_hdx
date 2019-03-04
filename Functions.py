@@ -167,9 +167,9 @@ def extract_HN(traj, prolines=None, atomselect="(name H or name HN)", log="HDX_a
 
 ### Switching functions for contacts etc. calculation
 ### 'Sigmoid': y = 1 / [ 1 + exp( -k * (x - d0) ) ]
-def sigmoid(x, k=1, d0=0):
+def sigmoid(x, k=1., d0=0):
     denom = 1 + np.exp( k * (x - d0) )
-    return 2/denom # Height 2 as d0 = midpoint of sigmoid
+    return 1./denom # Height 1 = d0 @ midpoint 0.5 contacts, Height 2 = d0 @ midpoint 1.0 contacts
 
 ### 'Rational_6_12': y = [ 1 - ( (x - d0) / x0 ) ** n ] / [ 1 - ( (x - d0) / x0 ) ** m ]
 def rational_6_12(x, k, d0=0, n=6, m=12):
