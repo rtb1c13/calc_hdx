@@ -391,7 +391,12 @@ class PH(DfPred.DfPredictor):
         """Initialise parameters for Persson-Halle-style analysis.
            See self.params for default values"""
         # Initialise main parameters with defaults
-        phparams = { 'cut_O' : 0.26 }
+        phparams = { 'cut_O' : 0.26,
+                     'contact_method' : 'cutoff',
+                     'switch_method' : 'rational_6_12',
+                     'switch_scale' : 1.0,
+                     'switch_width' : 0.25, }
+
         phparams.update(extra_params) # Update main parameter set from kwargs
         super(PH, self).__init__(**phparams)
 
@@ -419,7 +424,34 @@ class PH(DfPred.DfPredictor):
             return self
 
     def calc_wat_contacts(self, hn_atms):
-        """Calculate water contacts for each frame and residue in the trajectory"""
+        """Calculate contacts for each amide and frame in the trajectory
+           using a given method defined in PH.params['contact_method'].
+
+           Current options:
+           'cutoff' : Use a hard cutoff for counting contacts, defined as PH.params['cut_O']
+           'switch' : Use a switching function for counting contacts.
+                      r <= PH.params['cut_O'], count = 1
+                      r > PH.params['cut_O'], 0 < switched_count < 1
+
+           Options for the switching function should be defined in the 'PH.params'
+           dictionary.
+
+           hn_atms are the amide H atoms to search for contacts
+
+           Returns count of contacts for each frame in trajectory PH.t."""
+
+        # Switch for contacts methods
+        cmethods = {
+                    'cutoff' : self._calc_wat_contacts_cutoff,
+                    'switch' : self._calc_wat_contacts_switch
+                   }
+
+        return cmethods[self.params['contact_method']](hn_atms)
+
+
+    def _calc_wat_contacts_cutoff(self, hn_atms):
+        """Calculate water contacts for each frame and residue in the trajectory
+           using a hard distance cutoff"""
 
         solidxs = self.top.select("water and element O") 
         
@@ -435,6 +467,48 @@ class PH(DfPred.DfPredictor):
             if self.params['save_detailed']:
                 with open("Waters_%d.tmp" % self.top.atom(hn).residue.resSeq, 'ab') as wat_f:
                     np.savetxt(wat_f, contacts[idx], fmt='%d')
+
+        return np.asarray(reslist), contacts
+
+    def _calc_wat_contacts_switch(self, hn_atms):
+        """Calculate water contacts for each frame and residue in the trajectory
+           using a switching function with parameters defined in the PH.params dictionary"""
+
+        smethods = {
+                    'rational_6_12' : Functions.rational_6_12,
+                    'sigmoid' : Functions.sigmoid,
+                    'exponential' : Functions.exponential,
+                    'gaussian' : Functions.gaussian
+                   }
+        do_switch = lambda x: smethods[self.params['switch_method']](x, self.params['switch_scale'], self.params['cut_O'])
+
+        solidxs = self.top.select("water and element O") 
+        
+
+        if self.params['skip_first']:
+            hn_atms = hn_atms[1:]
+
+        reslist = [ self.top.atom(i).residue.index for i in hn_atms ]
+        contacts = np.zeros((len(reslist), self.t.n_frames))
+        for idx, hn in enumerate(hn_atms):
+            # Get count within lowcut
+            lowcut_ctacts = md.compute_neighbors(self.t, self.params['cut_O'], np.asarray([hn]), haystack_indices=solidxs)
+            highcut_ctacts = md.compute_neighbors(self.t, self.params['cut_O'] + self.params['switch_width'], np.asarray([hn]), haystack_indices=solidxs)
+            contact_count = np.asarray(map(lambda y: len(y), lowcut_ctacts))
+            pairs = self.t.top.select_pairs(np.array([hn]), solidxs)
+            fulldists = md.compute_distances(self.t, pairs)
+            new_contact_count = []
+            
+            for frameidx, count, lowidxs, highidxs in zip(range(0, self.t.n_frames), contact_count, lowcut_ctacts, highcut_ctacts):
+                betweenidxs = highidxs[np.in1d(highidxs, lowidxs) == False]
+#                pairs = np.insert(np.reshape(betweenidxs,(len(betweenidxs),1)), 0, np.asarray([hn]), axis=1) # Insert hn before each contact to create 2D array of atom pairs
+                currdists = fulldists[frameidx][np.where(np.in1d(pairs[:,1], betweenidxs))[0]]
+                count += np.sum(map(do_switch, currdists))
+                new_contact_count.append(count)
+            contacts[idx] = np.array(new_contact_count)
+            if self.params['save_detailed']:
+                with open("Waters_%d.tmp" % self.top.atom(hn).residue.resSeq, 'ab') as wat_f:
+                    np.savetxt(wat_f, contacts[idx], fmt='%10.8f')
 
         return np.asarray(reslist), contacts
 
@@ -460,7 +534,7 @@ class PH(DfPred.DfPredictor):
                     raise Functions.HDX_Error("One or more residues analysed for water contacts is either proline or a non-protein residue. Check your inputs!")
 
         # Update/calculation of PF
-        opencount, closedcount = np.sum(self.watcontacts > 1, axis=1), np.sum(self.watcontacts <= 1, axis=1)
+        opencount, closedcount = np.sum(self.watcontacts >= 2, axis=1), np.sum(self.watcontacts < 2, axis=1)
         with np.errstate(divide='ignore'):
             self.pfs = closedcount/opencount # Ignores divide by zero
 #            self.pfs[np.isinf(self.pfs)] = self.n_frames
