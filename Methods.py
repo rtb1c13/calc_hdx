@@ -87,7 +87,7 @@ class Radou(DfPred.DfPredictor):
 #            print("Now calculating contacts to single atom, idx %d" % qidx)
             qidx = np.array([qidx])
             byframe_ctacts = md.compute_neighbors(self.t, cutoff, qidx, haystack_indices=cidx)
-        return map(lambda x: len(x), byframe_ctacts)
+        return list(map(lambda x: len(x), byframe_ctacts))
 
     def _calc_contacts_switch(self, qidx, cidx, cutoff, scale):
         """Calculate contacts between 'query' and 'contact' atom selections
@@ -123,7 +123,7 @@ class Radou(DfPred.DfPredictor):
         highcut_ctacts = np.broadcast_to(cidx, (self.t.n_frames, len(cidx)))
         pairs = np.insert(np.reshape(cidx,(len(cidx),1)), 0, qidx, axis=1)
         totdists = md.compute_distances(self.t, pairs)
-        contact_count = np.sum(map(do_switch, totdists), axis=1)
+        contact_count = np.sum(np.array(list((map(do_switch, totdists))), axis=1)
         return contact_count
 
 ### Old, does switching only between a low_cut and a high_cut, not everywhere
@@ -478,8 +478,8 @@ class PH(DfPred.DfPredictor):
         reslist = [ self.top.atom(i).residue.index for i in hn_atms ]
         contacts = np.zeros((len(reslist), self.t.n_frames))
         for idx, hn in enumerate(hn_atms):
-            contacts[idx] = map(len, md.compute_neighbors(self.t, self.params['cut_O'],
-                                           np.asarray([hn]), haystack_indices=solidxs))
+            contacts[idx] = np.array(list(map(len, md.compute_neighbors(self.t, self.params['cut_O'],
+                                           np.asarray([hn]), haystack_indices=solidxs))))
             if self.params['save_detailed']:
                 with open("Waters_chain_%d_res_%d.tmp" % (self.top.atom(hn).residue.chain.index, self.top.atom(hn).residue.resSeq), 'ab') as wat_f:
                     np.savetxt(wat_f, contacts[idx], fmt='%d')

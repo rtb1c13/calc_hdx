@@ -108,7 +108,7 @@ def list_prolines(traj, log="HDX_analysis.log"):
         with open(log, 'a') as f:
             f.write("Prolines identified at resid:\n"+ \
                     "%s\n" % ' '.join(str(i) for i in prolist))
-        return np.asarray(zip(prolist, proidx))
+        return np.asarray(list(zip(prolist, proidx)))
     else:
         with open(log, 'a') as f:
             f.write("No prolines found in topology.\n")
@@ -201,7 +201,7 @@ def cacheobj(cachefn=None):
                     print("Read cache from file %s\n" % fn)
                 return cached_obj
 
-            except (KeyError, IOError, EOFError, TypeError):
+            except (KeyError, FileNotFoundError, EOFError, TypeError):
                 new_obj = func(*args, **kwargs)
             pickle.dump(args[0], open(fn,'wb'), protocol=-1) # Highest protocol for size purposes
             try:
