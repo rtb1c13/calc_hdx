@@ -417,7 +417,7 @@ class Analyze():
 #        self.tot_SEMs = np.zeros((len(self.pf_byframe)-1, 2), dtype=[np.int32, np.float64])
 #       Array(window, SEM)
         valid_windows = []
-        for window in xrange(1, int((self.c_n_frames[-1] / 2)) + 1):
+        for window in range(1, int((self.c_n_frames[-1] / 2)) + 1):
             if self.c_n_frames[-1] % window == 0:
                 valid_windows.append(window)
         with open(self.params['logfile'], 'a') as f:

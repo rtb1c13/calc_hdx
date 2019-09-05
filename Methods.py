@@ -123,7 +123,7 @@ class Radou(DfPred.DfPredictor):
         highcut_ctacts = np.broadcast_to(cidx, (self.t.n_frames, len(cidx)))
         pairs = np.insert(np.reshape(cidx,(len(cidx),1)), 0, qidx, axis=1)
         totdists = md.compute_distances(self.t, pairs)
-        contact_count = np.sum(np.array(list((map(do_switch, totdists))), axis=1)
+        contact_count = np.sum(np.array(list((map(do_switch, totdists)))), axis=1)
         return contact_count
 
 ### Old, does switching only between a low_cut and a high_cut, not everywhere
