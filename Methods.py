@@ -1,9 +1,7 @@
 #!/usr/bin/env python
 
 # Class for HDX trajectories, inherited from MDTraj
-from __future__ import print_function
-from __future__ import division
-# 
+#
 import mdtraj as md
 import numpy as np
 import os, glob, itertools, copy

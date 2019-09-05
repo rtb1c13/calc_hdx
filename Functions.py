@@ -2,8 +2,6 @@
 
 # Transferable functions for HDX analysis
 
-from __future__ import print_function
-from __future__ import division
 #
 import mdtraj as md
 import numpy as np

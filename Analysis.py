@@ -4,9 +4,6 @@
 
 import Functions, Methods
 import numpy as np
-### Remove next two for interactive node
-import matplotlib
-matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import os, glob, copy, itertools, pickle
 from scipy.stats import pearsonr as correl

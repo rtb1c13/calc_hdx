@@ -6,9 +6,6 @@
 # For help/usage instructions: calc_hdx.py -h
 #
 #
-# Python 3 compatibilities
-from __future__ import print_function
-from __future__ import division
 # Dependencies
 import mdtraj as md
 import sys, ast
