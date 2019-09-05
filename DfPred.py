@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
-# Class for HDX trajectories, inherited from MDTraj
+# Class for HDX deuterated fraction prediction objects
 #
 import mdtraj as md
 import numpy as np
-import os, glob, itertools, pickle, warnings
+import os, glob, itertools, pickle
 import Functions
 
 
@@ -46,7 +46,7 @@ class DfPredictor(object):
         # Each key is a residue name, each value is [ lgAL, lgAR, lgBL, lgBR ]
         # Values from Nguyen et al., J. Am. Soc. Mass Spec., 2018, 29, 1936-1939
 
-        # Note that these are the latest, 2018 parameters used on Englander's website
+        # Note that these are the 2018 parameters used on Englander's website
         rate_adjs = { 'ALA': [ 0.00, 0.00, 0.00, 0.00 ],
                       'ARG': [ -0.59, -0.32, 0.08, 0.22 ],
                       'ASN': [ -0.58, -0.13, 0.49, 0.32 ],
@@ -272,13 +272,13 @@ class DfPredictor(object):
 
         # Calc reference rates at experimental temperature
         # / np.log(10) = conversion from ln to log10
-        lgkAexp = self.params['kint_params']['lgkAref'] - (self.params['kint_params']['EaA'] \
+        lgkAexp = self.params['kint_params']['lgkAref'] - (self.params['kint_params']['EaA']
                   /  np.log(10) / self.params['kint_params']['R']) * \
                   (1./self.params['kint_params']['Texp'] - 1./self.params['kint_params']['Tref'])
-        lgkBexp = self.params['kint_params']['lgkBref'] - (self.params['kint_params']['EaB'] \
+        lgkBexp = self.params['kint_params']['lgkBref'] - (self.params['kint_params']['EaB']
                   /  np.log(10) / self.params['kint_params']['R']) * \
                   (1./self.params['kint_params']['Texp'] - 1./self.params['kint_params']['Tref'])
-        lgkWexp = self.params['kint_params']['lgkWref'] - (self.params['kint_params']['EaW'] \
+        lgkWexp = self.params['kint_params']['lgkWref'] - (self.params['kint_params']['EaW']
                   /  np.log(10) / self.params['kint_params']['R']) * \
                   (1./self.params['kint_params']['Texp'] - 1./self.params['kint_params']['Tref'])
 
@@ -436,14 +436,14 @@ class DfPredictor(object):
         # Save Kints to separate log file, appending filenames for trajectories read as chunks
         if os.path.exists(self.params['outprefix']+"Intrinsic_rates.dat"):
             filenum = len(glob.glob(self.params['outprefix']+"Intrinsic_rates*"))
-            np.savetxt(self.params['outprefix']+"Intrinsic_rates_chunk_%d.dat" % (filenum+1), \
-                       np.stack((rids, kints), axis=1), fmt=['%7d','%18.8f'], \
+            np.savetxt(self.params['outprefix']+"Intrinsic_rates_chunk_%d.dat" % (filenum+1),
+                       np.stack((rids, kints), axis=1), fmt=['%7d','%18.8f'],
                        header="ResID  Intrinsic rate / min^-1 ") # Use residue indices internally, print out IDs
         else:    
-            np.savetxt(self.params['outprefix']+"Intrinsic_rates.dat", np.stack((rids, kints), axis=1), \
+            np.savetxt(self.params['outprefix']+"Intrinsic_rates.dat", np.stack((rids, kints), axis=1),
                        fmt=['%7d','%18.8f'], header="ResID  Intrinsic rate / min^-1 ") # Use residue indices internally, print out IDs
 
-        for residx, oldname in oldnames.iteritems():
+        for residx, oldname in oldnames.items():
             self.top.residue(residx).name = oldname
         self.oldnames = oldnames
         return kints
@@ -489,7 +489,7 @@ class DfPredictor(object):
                 logerr = logf + np.log(err) + np.log(time) # sd(e^Aa) = f * sd(A) * a
                 err = np.exp(logerr)          # Avoid underflow 
                 return np.asarray([val, err])
-            for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, curr_pfs, self.rates)):
+            for i1, curr_frac in enumerate(map(_residue_fraction, curr_pfs, self.rates)):
                 fracs[i1,i2,:] = curr_frac
 
         rids = np.asarray([ self.top.residue(i).resSeq for i in self.reslist ])
@@ -499,15 +499,15 @@ class DfPredictor(object):
         if write:
             if os.path.exists(self.params['outprefix']+"Residue_fractions.dat"):
                 filenum = len(glob.glob(self.params['outprefix']+"Residue_fractions*"))
-                np.savetxt(self.params['outprefix']+"Residue_fractions_chunk_%d.dat" % (filenum+1), \
-                           np.concatenate((rids, outfracs), axis=1), \
-                           fmt='%7d ' + '%8.5f '*len(self.params['times']*2), \
+                np.savetxt(self.params['outprefix']+"Residue_fractions_chunk_%d.dat" % (filenum+1),
+                           np.concatenate((rids, outfracs), axis=1),
+                           fmt='%7d ' + '%8.5f '*len(self.params['times']*2),
                            header="ResID  Deuterated fraction, Times, std. dev / min : %s" \
                            % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
             else:    
-                np.savetxt(self.params['outprefix']+"Residue_fractions.dat", \
-                           np.concatenate((rids, outfracs), axis=1), \
-                           fmt='%7d ' + '%8.5f '*len(self.params['times']*2), \
+                np.savetxt(self.params['outprefix']+"Residue_fractions.dat",
+                           np.concatenate((rids, outfracs), axis=1),
+                           fmt='%7d ' + '%8.5f '*len(self.params['times']*2),
                            header="ResID  Deuterated fraction, Times / min: %s" \
                            % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
         return fracs

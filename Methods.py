@@ -378,11 +378,11 @@ class Radou(DfPred.DfPredictor):
         # Save PFs to separate log file, appending filenames for trajectories read as chunks
         if os.path.exists(self.params['outprefix']+"Protection_factors.dat"):
             filenum = len(glob.glob(self.params['outprefix']+"Protection_factors*"))
-            np.savetxt(self.params['outprefix']+"Protection_factors_chunk_%d.dat" % (filenum+1), \
-                       np.concatenate((rids, pf_bar), axis=1), fmt=['%7d', '%18.8f', '%18.8f'], \
+            np.savetxt(self.params['outprefix']+"Protection_factors_chunk_%d.dat" % (filenum+1),
+                       np.concatenate((rids, pf_bar), axis=1), fmt=['%7d', '%18.8f', '%18.8f'],
                        header="ResID  Protection factor Std. Dev.") # Use residue indices internally, print out IDs
         else:    
-            np.savetxt(self.params['outprefix']+"Protection_factors.dat", np.concatenate((rids, pf_bar), axis=1), \
+            np.savetxt(self.params['outprefix']+"Protection_factors.dat", np.concatenate((rids, pf_bar), axis=1),
                        fmt=['%7d', '%18.8f', '%18.8f'], header="ResID  Protection factor Std. Dev.") # Use residue indices internally, print out IDs
 
         # Do same for ln(Pf)
@@ -392,11 +392,11 @@ class Radou(DfPred.DfPredictor):
         # Save PFs to separate log file, appending filenames for trajectories read as chunks
         if os.path.exists(self.params['outprefix']+"logProtection_factors.dat"):
             filenum = len(glob.glob(self.params['outprefix']+"logProtection_factors*"))
-            np.savetxt(self.params['outprefix']+"logProtection_factors_chunk_%d.dat" % (filenum+1), \
-                       np.concatenate((rids, lnpf_bar), axis=1), fmt=['%7d', '%18.8f', '%18.8f'], \
+            np.savetxt(self.params['outprefix']+"logProtection_factors_chunk_%d.dat" % (filenum+1),
+                       np.concatenate((rids, lnpf_bar), axis=1), fmt=['%7d', '%18.8f', '%18.8f'],
                        header="ResID  ln(Protection factor) Std. Dev.") # Use residue indices internally, print out IDs
         else:    
-            np.savetxt(self.params['outprefix']+"logProtection_factors.dat", np.concatenate((rids, lnpf_bar), axis=1), \
+            np.savetxt(self.params['outprefix']+"logProtection_factors.dat", np.concatenate((rids, lnpf_bar), axis=1),
                        fmt=['%7d', '%18.8f', '%18.8f'], header="ResID  ln(Protection factor) Std. Dev.") # Use residue indices internally, print out IDs
 
         return hres, pf_bar, pf_byframe, lnpf_bar, lnpf_byframe
@@ -478,7 +478,7 @@ class PH(DfPred.DfPredictor):
         reslist = [ self.top.atom(i).residue.index for i in hn_atms ]
         contacts = np.zeros((len(reslist), self.t.n_frames))
         for idx, hn in enumerate(hn_atms):
-            contacts[idx] = map(len, md.compute_neighbors(self.t, self.params['cut_O'], \
+            contacts[idx] = map(len, md.compute_neighbors(self.t, self.params['cut_O'],
                                            np.asarray([hn]), haystack_indices=solidxs))
             if self.params['save_detailed']:
                 with open("Waters_chain_%d_res_%d.tmp" % (self.top.atom(hn).residue.chain.index, self.top.atom(hn).residue.resSeq), 'ab') as wat_f:
