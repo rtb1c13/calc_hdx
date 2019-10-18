@@ -10,6 +10,7 @@
 import mdtraj as md
 import sys, ast
 import argparse
+from functools import reduce
 # 
 import Functions, Methods, Analysis
 
