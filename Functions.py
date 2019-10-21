@@ -72,11 +72,12 @@ def itertraj_slice(gen, chunk, end, stride=1):
     end = int(end) # floor
     while yielded_frames + chunk < end:
         yielded_frames += chunk
-        x = gen.next()
+        x = next(gen)
         yield x
-    x = gen.next()
+    x = next(gen)
     yield x[:(end - yielded_frames)]
-    raise StopIteration
+    #raise StopIteration # RuntimeError in 3.7+
+    return
 
 def select(traj, selection):
     """Strips a trajectory based on the MDTraj-format text selection
