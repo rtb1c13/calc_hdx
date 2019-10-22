@@ -4,9 +4,6 @@
 
 import Functions, Methods
 import numpy as np
-### Remove next two for interactive node
-import matplotlib
-matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import os, glob, copy, itertools, pickle
 from scipy.stats import pearsonr as correl
@@ -42,9 +39,15 @@ class Analyze():
             self.c_resfracs = np.copy(self.resfracs)
             # Byframe PFs = 2D-array[residue, PFs]
             self.pf_byframe = np.copy(resobj.pf_byframe)
+            if type(resobj) is Methods.Radou:
+                self.lnpf_byframe = np.copy(resobj.lnpf_byframe)
             # Cumulative PFs = 2D-array[chunk, PFs]
             self.pfs = np.reshape(resobj.pfs[:,0], (1, len(resobj.pfs)))
+            if type(resobj) is Methods.Radou:
+                self.lnpfs = np.reshape(resobj.lnpfs[:,0], (1, len(resobj.lnpfs)))
             self.c_pfs = np.copy(self.pfs)
+            if type(resobj) is Methods.Radou:
+                self.c_lnpfs = np.copy(self.lnpfs)
             # Cumulative n_frames = 1D-array[n_frames]
             self.n_frames = np.atleast_1d(resobj.n_frames)
             self.c_n_frames = np.copy(self.n_frames)
@@ -85,19 +88,32 @@ class Analyze():
                 new.c_pfs = np.cumsum(_, axis=0)
                 for tot_frames, tot_pf in zip(new.c_n_frames, new.c_pfs):
                     tot_pf /= tot_frames
+
+                # new.c_lnpfs should be calculated from new.lnpf_byframe
+                if type(self.resobj) is Methods.Radou:
+                    new.lnpf_byframe = np.concatenate((new.lnpf_byframe, other.lnpf_byframe), axis=1)
+                    new.lnpfs = np.concatenate((new.lnpfs, other.lnpfs), axis=0)
+                    new.c_lnpfs = np.append(new.c_lnpfs, np.mean(new.lnpf_byframe, axis=1)[np.newaxis,:], axis=0)
             
                 # Calc running ave of resfracs = 3D-array[chunk, resfrac, time]
                 new.resfracs = np.concatenate((new.resfracs, other.resfracs), axis=0)
                 _ = np.zeros(new.resfracs[0].shape)
                 # Redo resfrac calculation based on running average of pfs
                 # N.B. Due to the exponential this is NOT just an average of the resfrac blocks
-                for i2, t in enumerate(new.params['times']):
-                    def _residue_fraction(pf, k, time=t):
-                        return 1 - np.exp(-k / pf * time)
-                    for i1, curr_frac in enumerate(itertools.imap(_residue_fraction, new.c_pfs[-1], new.rates)):
-                        _[i1,i2] = curr_frac
-                new.c_resfracs = np.concatenate((new.c_resfracs, \
-                                                 np.reshape(_, (1, len(new.residxs), len(new.params['times'])))), \
+                if type(self.resobj) is Methods.Radou:
+                    for i2, t in enumerate(new.params['times']):
+                        def _residue_fraction_lnpf(lnpf, k, time=t):
+                            return 1 - np.exp((-k / np.exp(lnpf)) * time)
+                        for i1, curr_frac in enumerate(map(_residue_fraction_lnpf, new.c_lnpfs[-1], new.rates)):
+                            _[i1,i2] = curr_frac
+                else:
+                    for i2, t in enumerate(new.params['times']):
+                        def _residue_fraction(pf, k, time=t):
+                            return 1 - np.exp((-k / pf) * time)
+                        for i1, curr_frac in enumerate(map(_residue_fraction, new.c_pfs[-1], new.rates)):
+                            _[i1,i2] = curr_frac
+                new.c_resfracs = np.concatenate((new.c_resfracs,
+                                                 np.reshape(_, (1, len(new.residxs), len(new.params['times'])))),
                                                  axis=0)
 
                 return new
@@ -156,7 +172,7 @@ class Analyze():
            
            Usage: _cumulative_average(data, blocksizes)"""
         if not len(data) == np.sum(blocksizes):
-            raise Functions.HDX_Error("Unable to cumulatively average data of length %d using total blocksizes %d"\
+            raise Functions.HDX_Error("Unable to cumulatively average data of length %d using total blocksizes %d" \
                                       % (len(data), int(np.sum(blocksizes))))
         aves = np.zeros(len(blocksizes))
         blocksum = np.cumsum(blocksizes)
@@ -169,7 +185,7 @@ class Analyze():
 
         # segfile should contain at most 3 columns: startres, endres, chain_idx
         try:
-            self.segres = np.loadtxt(self.params['segfile'], \
+            self.segres = np.loadtxt(self.params['segfile'],
                                      dtype=[ ('segres', np.int32, (2,)), ('chain', np.int32, (1)) ])  # ResIDs will be converted to indices with dictionary in segments function
             with open(self.params['logfile'], 'a') as f:
                 f.write("Chain indices read from segments file - segment averaging will be performed on defined chains\n")
@@ -198,24 +214,24 @@ class Analyze():
         # Check I'm not loading in too many timepoints
         try:
             if self._single_chain:
-                expt = np.loadtxt(self.params['expfile'], dtype=[ ('segres', np.int32, (2,)), \
+                expt = np.loadtxt(self.params['expfile'], dtype=[ ('segres', np.int32, (2,)),
                                   ('fracs', np.float64, (len(self.params['times']),)) ])
             else:
-                expt = np.loadtxt(self.params['expfile'], dtype=[ ('segres', np.int32, (2,)), \
+                expt = np.loadtxt(self.params['expfile'], dtype=[ ('segres', np.int32, (2,)),
                                   ('chain', np.int32, (1)), ('fracs', np.float64, (len(self.params['times']),)) ])
-        except ValueError, err:
+        except ValueError as err:
             raise Functions.HDX_Error("There's a problem with the experimental data file. It has too few timepoints. \n" \
                                       "This can be caused if you've defined chain indices in the segments file but not in the experimental data file.\n" \
                                       "The error while reading was: %s" % str(err))
         # Now check I'm not loading in too few timepoints
         try:
             if self._single_chain:
-                expt = np.loadtxt(self.params['expfile'], dtype=[ ('segres', np.int32, (2,)),\
+                expt = np.loadtxt(self.params['expfile'], dtype=[ ('segres', np.int32, (2,)),
                                   ('fracs', np.float64, (len(self.params['times']) + 1,)) ])
             else:
-                expt = np.loadtxt(self.params['expfile'], dtype=[ ('segres', np.int32, (2,)), \
+                expt = np.loadtxt(self.params['expfile'], dtype=[ ('segres', np.int32, (2,)),
                                   ('chain', np.int32, (1)), ('fracs', np.float64, (len(self.params['times']) + 1,)) ])
-            raise Functions.HDX_Error("There's a problem with the experimental data file. It has too many timepoints." \
+            raise Functions.HDX_Error("There's a problem with the experimental data file. It has too many timepoints. \n" 
                                       "This can be caused if you've defined chain indices in the experimental data file but not in the segments file.\n")
         except ValueError:
             pass
@@ -363,25 +379,25 @@ class Analyze():
             for chunkave in aves:
                 if os.path.exists(self.params['outprefix']+"Segment_average_fractions.dat"):
                     filenum = len(glob.glob(self.params['outprefix']+"Segment_average_fractions*"))
-                    np.savetxt(self.params['outprefix']+"Segment_average_fractions_chunk_%d.dat" % (filenum+1), \
-                               np.hstack((self.segres['segres'], chunkave)), \
+                    np.savetxt(self.params['outprefix']+"Segment_average_fractions_chunk_%d.dat" % (filenum+1),
+                               np.hstack((self.segres['segres'], chunkave)),
                                fmt='%6d %6d ' + '%8.5f '*len(self.params['times']), header="Res1   Res2  Times / min: %s" \
                                % ' '.join([ str(t) for t in self.params['times'] ]))
                 else:
-                    np.savetxt(self.params['outprefix']+"Segment_average_fractions.dat", np.hstack((self.segres['segres'], chunkave)), \
+                    np.savetxt(self.params['outprefix']+"Segment_average_fractions.dat", np.hstack((self.segres['segres'], chunkave)),
                                fmt='%6d %6d ' + '%8.5f '*len(self.params['times']), header="Res1   Res2  Times / min: %s" \
                                % ' '.join([ str(t) for t in self.params['times'] ]))
         else:
             for chunkave in aves:
                 if os.path.exists(self.params['outprefix']+"Segment_average_fractions.dat"):
                     filenum = len(glob.glob(self.params['outprefix']+"Segment_average_fractions*"))
-                    np.savetxt(self.params['outprefix']+"Segment_average_fractions_chunk_%d.dat" % (filenum+1), \
-                               np.hstack((self.segres['segres'], self.segres['chain'].reshape((len(self.segres['segres']),1)), chunkave)), \
+                    np.savetxt(self.params['outprefix']+"Segment_average_fractions_chunk_%d.dat" % (filenum+1),
+                               np.hstack((self.segres['segres'], self.segres['chain'].reshape((len(self.segres['segres']),1)), chunkave)),
                                fmt='%6d %6d %6d ' + '%8.5f '*len(self.params['times']), header="Res1   Res2  Chain  Times / min: %s" \
                                % ' '.join([ str(t) for t in self.params['times'] ]))
                 else:
-                    np.savetxt(self.params['outprefix']+"Segment_average_fractions.dat", np.hstack((self.segres['segres'], \
-                               self.segres['chain'].reshape((len(self.segres['segres']),1)), chunkave)), \
+                    np.savetxt(self.params['outprefix']+"Segment_average_fractions.dat", np.hstack((self.segres['segres'],
+                               self.segres['chain'].reshape((len(self.segres['segres']),1)), chunkave)),
                                fmt='%6d %6d %6d ' + '%8.5f '*len(self.params['times']), header="Res1   Res2  Chain  Times / min: %s" \
                                % ' '.join([ str(t) for t in self.params['times'] ]))
 
@@ -401,7 +417,7 @@ class Analyze():
 #        self.tot_SEMs = np.zeros((len(self.pf_byframe)-1, 2), dtype=[np.int32, np.float64])
 #       Array(window, SEM)
         valid_windows = []
-        for window in xrange(1, int((self.c_n_frames[-1] / 2)) + 1):
+        for window in range(1, int((self.c_n_frames[-1] / 2)) + 1):
             if self.c_n_frames[-1] % window == 0:
                 valid_windows.append(window)
         with open(self.params['logfile'], 'a') as f:
@@ -484,28 +500,44 @@ class Analyze():
         try:
             if os.path.exists(self.params['outprefix']+"SUMMARY_protection_factors.dat"):
                 filenum = len(glob.glob(self.params['outprefix']+"SUMMARY_protection_factors*"))
-                np.savetxt(self.params['outprefix']+"SUMMARY_protection_factors_%d.dat" % (filenum+1), \
-                           np.stack((self.resnums, self.c_pfs[-1]), axis=1), fmt=['%7d','%18.8f'], \
+                np.savetxt(self.params['outprefix']+"SUMMARY_protection_factors_%d.dat" % (filenum+1),
+                           np.stack((self.resnums, self.c_pfs[-1]), axis=1), fmt=['%7d','%18.8f'],
                            header="ResID  Protection factor") # Use residue indices internally, print out IDs
             else:    
-                np.savetxt(self.params['outprefix']+"SUMMARY_protection_factors.dat", np.stack((self.resnums, self.c_pfs[-1]), axis=1), \
+                np.savetxt(self.params['outprefix']+"SUMMARY_protection_factors.dat", np.stack((self.resnums, self.c_pfs[-1]), axis=1),
                            fmt=['%7d','%18.8f'], header="ResID  Protection factor") # Use residue indices internally, print out IDs
         except AttributeError:
             raise Functions.HDX_Error("Can't write summary protection factors - perhaps you haven't calculated them yet?")
+
+        # Save log(PFs) to 'SUMMARY' file
+        try:
+            if os.path.exists(self.params['outprefix']+"SUMMARY_logProtection_factors.dat"):
+                filenum = len(glob.glob(self.params['outprefix']+"SUMMARY_logProtection_factors*"))
+                np.savetxt(self.params['outprefix']+"SUMMARY_logProtection_factors_%d.dat" % (filenum+1),
+                           np.stack((self.resnums, self.c_lnpfs[-1]), axis=1), fmt=['%7d','%18.8f'],
+                           header="ResID  ln(Protection factor)") # Use residue indices internally, print out IDs
+            else:    
+                np.savetxt(self.params['outprefix']+"SUMMARY_logProtection_factors.dat", np.stack((self.resnums, self.c_lnpfs[-1]), axis=1),
+                           fmt=['%7d','%18.8f'], header="ResID  ln(Protection factor)") # Use residue indices internally, print out IDs
+        except AttributeError:
+            if type(self.resobj) is Methods.Radou:
+                raise Functions.HDX_Error("Can't write summary log protection factors - perhaps you haven't calculated them yet?")
+            else:
+                pass
 
         # Save residue deuterated fractions to 'SUMMARY' file
         try:
             if os.path.exists(self.params['outprefix']+"SUMMARY_residue_fractions.dat"):
                 filenum = len(glob.glob(self.params['outprefix']+"SUMMARY_residue_fractions*"))
-                np.savetxt(self.params['outprefix']+"SUMMARY_residue_fractions_%d.dat" % (filenum+1), \
-                           np.concatenate((np.reshape(self.resnums, (len(self.residxs),1)), self.c_resfracs[-1]), axis=1), \
-                           fmt='%7d ' + '%8.5f '*len(self.params['times']), \
+                np.savetxt(self.params['outprefix']+"SUMMARY_residue_fractions_%d.dat" % (filenum+1),
+                           np.concatenate((np.reshape(self.resnums, (len(self.residxs),1)), self.c_resfracs[-1]), axis=1),
+                           fmt='%7d ' + '%8.5f '*len(self.params['times']),
                            header="ResID  Deuterated fraction, Times / min: %s" \
                            % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
             else:    
-                np.savetxt(self.params['outprefix']+"SUMMARY_residue_fractions.dat", \
-                           np.concatenate((np.reshape(self.resnums, (len(self.residxs),1)), self.c_resfracs[-1]), axis=1), \
-                           fmt='%7d ' + '%8.5f '*len(self.params['times']), \
+                np.savetxt(self.params['outprefix']+"SUMMARY_residue_fractions.dat",
+                           np.concatenate((np.reshape(self.resnums, (len(self.residxs),1)), self.c_resfracs[-1]), axis=1),
+                           fmt='%7d ' + '%8.5f '*len(self.params['times']),
                            header="ResID  Deuterated fraction, Times / min: %s" \
                            % ' '.join([ str(t) for t in self.params['times'] ])) # Use residue indices internally, print out IDs
         except AttributeError:
@@ -517,25 +549,25 @@ class Analyze():
             if self._single_chain: 
                 if os.path.exists(self.params['outprefix']+"SUMMARY_segment_average_fractions.dat"):
                     filenum = len(glob.glob(self.params['outprefix']+"SUMMARY_segment_average_fractions*"))
-                    np.savetxt(self.params['outprefix']+"SUMMARY_segment_average_fractions_%d.dat" % (filenum+1), \
-                               np.hstack((self.segres['segres'], self.c_segfracs[-1])), \
+                    np.savetxt(self.params['outprefix']+"SUMMARY_segment_average_fractions_%d.dat" % (filenum+1),
+                               np.hstack((self.segres['segres'], self.c_segfracs[-1])),
                                fmt='%6d %6d ' + '%8.5f '*len(self.params['times']), header="Res1   Res2  Times / min: %s" \
                                % ' '.join([ str(t) for t in self.params['times'] ]))
                 else:
-                    np.savetxt(self.params['outprefix']+"SUMMARY_segment_average_fractions.dat", \
-                               np.hstack((self.segres['segres'], self.c_segfracs[-1])), \
+                    np.savetxt(self.params['outprefix']+"SUMMARY_segment_average_fractions.dat",
+                               np.hstack((self.segres['segres'], self.c_segfracs[-1])),
                                fmt='%6d %6d ' + '%8.5f '*len(self.params['times']), header="Res1   Res2  Times / min: %s" \
                                % ' '.join([ str(t) for t in self.params['times'] ]))
             else:
                 if os.path.exists(self.params['outprefix']+"SUMMARY_segment_average_fractions.dat"):
                     filenum = len(glob.glob(self.params['outprefix']+"SUMMARY_segment_average_fractions*"))
-                    np.savetxt(self.params['outprefix']+"SUMMARY_segment_average_fractions_%d.dat" % (filenum+1), \
-                               np.hstack((self.segres['segres'], self.segres['chain'].reshape((len(self.segres['segres']),1)), self.c_segfracs[-1])), \
+                    np.savetxt(self.params['outprefix']+"SUMMARY_segment_average_fractions_%d.dat" % (filenum+1),
+                               np.hstack((self.segres['segres'], self.segres['chain'].reshape((len(self.segres['segres']),1)), self.c_segfracs[-1])),
                                fmt='%6d %6d %6d ' + '%8.5f '*len(self.params['times']), header="Res1   Res2  Chain  Times / min: %s" \
                                % ' '.join([ str(t) for t in self.params['times'] ]))
                 else:
-                    np.savetxt(self.params['outprefix']+"SUMMARY_segment_average_fractions.dat", \
-                               np.hstack((self.segres['segres'], self.segres['chain'].reshape((len(self.segres['segres']),1)), self.c_segfracs[-1])), \
+                    np.savetxt(self.params['outprefix']+"SUMMARY_segment_average_fractions.dat",
+                               np.hstack((self.segres['segres'], self.segres['chain'].reshape((len(self.segres['segres']),1)), self.c_segfracs[-1])),
                                fmt='%6d %6d %6d ' + '%8.5f '*len(self.params['times']), header="Res1   Res2  Chain  Times / min: %s" \
                                % ' '.join([ str(t) for t in self.params['times'] ]))
                 
@@ -549,6 +581,9 @@ class Analyze():
         """Run a by-segment HDX prediction and optionally compares to experiment"""
 
         self.pf_byframe = np.nan_to_num(self.pf_byframe)
+        if type(self.resobj) is Methods.Radou:
+            self.lnpf_byframe = np.nan_to_num(self.lnpf_byframe)
+#        self.resfracs = self.resobj.dfrac(write=True, use_self=False, alternate_pfs=np.stack((np.exp(np.mean(self.lnpf_byframe, axis=1)), np.exp(np.std(self.lnpf_byframe, axis=1, ddof=1))), axis=1))
         self.read_segfile()
         self.check_blocksize()
         self.propagate_errors()
@@ -669,7 +704,7 @@ class Plots():
            penultimate tick if it's closer than interval/2 to maxdata"""
 
         # Prepend with min        
-        ticklist = filter(lambda x: x >= mindata, ticklist)
+        ticklist = list(filter(lambda x: x >= mindata, ticklist))
         if ticklist[0] == mindata:
             pass
         else:
@@ -677,7 +712,7 @@ class Plots():
         
 
         # Append with max
-        ticklist = filter(lambda y: y <= maxdata, ticklist)
+        ticklist = list(filter(lambda y: y <= maxdata, ticklist))
         if ticklist[-1] == maxdata:
             return ticklist
         elif maxdata - ticklist[-1] <= interval/2:
@@ -755,7 +790,7 @@ class Plots():
 #            _plot_df_curve(ax1, d1[0]
 #            ax7 = plt.subplot2grid((4,2),d7[1], sharey=ax8)
 
-            fig1, axs1 = plt.subplots(ncols=4, nrows=3, sharex=True, \
+            fig1, axs1 = plt.subplots(ncols=4, nrows=3, sharex=True,
                                      sharey=True, figsize=(11, 8.5)) # Letter
             fig1.suptitle("Deuterated fractions against time")
             for ax in axs1[:,0]:
@@ -764,18 +799,18 @@ class Plots():
                 ax.set_xlabel("Time / min", fontsize=12)
             axs1 = axs1.flatten()
             if self.avail['_expt_overlay']:
-                for a, predsegs, sliceidx, expt in zip(axs1, \
-                                             np.hstack((self.results.segres['segres'], self.results.c_segfracs[-1]))[startslice:endslice+1], \
-                                             range(startslice,endslice+1), \
+                for a, predsegs, sliceidx, expt in zip(axs1,
+                                             np.hstack((self.results.segres['segres'], self.results.c_segfracs[-1]))[startslice:endslice+1],
+                                             range(startslice,endslice+1),
                                              self.results.expfracs[startslice:endslice+1]):
                     _plot_df_curve(a, predsegs, self.results.segfracs[:,sliceidx], overlay_ys=expt)
             else:
-                for a, predsegs, sliceidx, in zip(axs1, \
-                                       np.hstack((self.results.segres['segres'], self.results.c_segfracs[-1]))[startslice:endslice+1], \
+                for a, predsegs, sliceidx, in zip(axs1,
+                                       np.hstack((self.results.segres['segres'], self.results.c_segfracs[-1]))[startslice:endslice+1],
                                        range(startslice,endslice+1)):
                     _plot_df_curve(a, predsegs, self.results.segfracs[:,sliceidx])
 
-            fig2, axs2 = plt.subplots(ncols=4, nrows=3, sharex=True, \
+            fig2, axs2 = plt.subplots(ncols=4, nrows=3, sharex=True,
                                      sharey=True, figsize=(11, 8.5)) # Letter
             fig2.suptitle("Deuterated fractions against time (log-scaled)")
             for ax in axs2[:,0]:
@@ -784,14 +819,14 @@ class Plots():
                 ax.set_xlabel("Time / min (log-scaled)", fontsize=12)
             axs2 = axs2.flatten()
             if self.avail['_expt_overlay']:
-                for a, predsegs, sliceidx, expt in zip(axs2, \
-                                             np.hstack((self.results.segres['segres'], self.results.c_segfracs[-1]))[startslice:endslice+1], \
-                                             range(startslice,endslice+1), \
+                for a, predsegs, sliceidx, expt in zip(axs2,
+                                             np.hstack((self.results.segres['segres'], self.results.c_segfracs[-1]))[startslice:endslice+1],
+                                             range(startslice,endslice+1),
                                              self.results.expfracs[startslice:endslice+1]):
                     _plot_log_df_curve(a, predsegs, self.results.segfracs[:,sliceidx], overlay_ys=expt)
             else:
-                for a, predsegs, sliceidx in zip(axs2, \
-                                       np.hstack((self.results.segres['segres'], self.results.c_segfracs[-1]))[startslice:endslice+1], \
+                for a, predsegs, sliceidx in zip(axs2,
+                                       np.hstack((self.results.segres['segres'], self.results.c_segfracs[-1]))[startslice:endslice+1],
                                        range(startslice,endslice+1)):
                     _plot_log_df_curve(a, predsegs, self.results.segfracs[:,sliceidx])
 
@@ -845,9 +880,9 @@ class Plots():
                 
         with PdfPages(self.results.params['outprefix']+"df_convergence.pdf") as pdf:
             for i, currseg in enumerate(self.results.segres['segres']):
-                currfig = _plot_df_convergence(self.results.segfracs[:,i,:], \
-                                               self.results.c_segfracs[:,i,:], \
-                                               self.results.seg_SEMs[:,i,:], \
+                currfig = _plot_df_convergence(self.results.segfracs[:,i,:],
+                                               self.results.c_segfracs[:,i,:],
+                                               self.results.seg_SEMs[:,i,:],
                                                currseg)
                 pdf.savefig(currfig)
                 plt.close()
@@ -871,9 +906,9 @@ class Plots():
             ax.set_ylim(0.0, 1.0)
 
             if overlay_fracs is not None:
-                ax.plot(xs, cumul_fracs, \
+                ax.plot(xs, cumul_fracs,
                         label="Predicted fraction, R = %3.2f" % self.results.correls[timeidx])
-                ax.plot(xs, overlay_fracs, \
+                ax.plot(xs, overlay_fracs,
                         label="Experimental fraction", linestyle=':')
                 fig.suptitle("By-segment predicted & experimental deuterated fractions")
             else:
@@ -924,23 +959,23 @@ class Plots():
                 ax1 = fig.gca()
                 if self.avail['_expt_overlay']:
                     fig.suptitle("By-segment predicted & experimental deuterated fractions")
-                    ax1 = _plot_seg_curve(ax1, self.results.c_segfracs[-1,:,timeidx], self.results.segres['segres'], \
+                    ax1 = _plot_seg_curve(ax1, self.results.c_segfracs[-1,:,timeidx], self.results.segres['segres'],
                                           self.results.n_frames[0], t, self.results.expfracs[:,timeidx])
                     # +/- std.dev
-                    ax1 = _fill_seg_range(ax1, self.results.segfracs[:,:,timeidx], self.results.segres['segres'], \
+                    ax1 = _fill_seg_range(ax1, self.results.segfracs[:,:,timeidx], self.results.segres['segres'],
                                           self.results.c_segfracs[-1,:,timeidx])
                 else:
                     fig.suptitle("By-segment predicted deuterated fractions")
-                    ax1 = _plot_seg_curve(ax1, self.results.c_segfracs[-1,:,timeidx], self.results.segres['segres'], \
+                    ax1 = _plot_seg_curve(ax1, self.results.c_segfracs[-1,:,timeidx], self.results.segres['segres'],
                                           self.results.n_frames[0], t)
-                    ax1 = _fill_seg_range(ax1, self.results.segfracs[:,:,timeidx], self.results.segres['segres'], \
+                    ax1 = _fill_seg_range(ax1, self.results.segfracs[:,:,timeidx], self.results.segres['segres'],
                                           self.results.c_segfracs[-1,:,timeidx])
                 ax1.legend()
                 fig.tight_layout(rect=[0,0,1,0.95])
                 pdf.savefig(fig)
                 plt.close()
             # All timepoint plot, no expt.
-            currfig = _plot_all_seg_curves(self.results.c_segfracs[-1], self.results.segres['segres'], \
+            currfig = _plot_all_seg_curves(self.results.c_segfracs[-1], self.results.segres['segres'],
                                            self.results.params['times'])
             pdf.savefig(currfig)
             plt.close()
@@ -1011,7 +1046,7 @@ class Plots():
             ax = fig.gca()
             xs = self.results.c_n_frames
             l = ax.plot(xs, np.sum(self.results.c_pfs, axis=1), label="Running average")
-            ax.errorbar(xs, np.sum(self.results.pfs, axis=1), yerr=tots, \
+            ax.errorbar(xs, np.sum(self.results.pfs, axis=1), yerr=tots,
                                    label="Block protection factor +/- std. err.", fmt='o', capsize=2, color=l[-1].get_color())
             ax.set_title("Total protection factors across trajectory")
             ax.set_ylabel("Protection factor")
@@ -1034,7 +1069,7 @@ class Plots():
             #ax.scatter(xs, np.log10(np.sum(self.results.pfs, axis=1)), label="Block protection factor", marker='o')
             #ax.plot(xs, np.log10(np.sum(self.results.c_pfs, axis=1)), label="Running average")
             l = ax.plot(xs, np.sum(self.results.c_pfs, axis=1), label="Running average")
-            ax.errorbar(xs, np.sum(self.results.pfs, axis=1), yerr=tots, \
+            ax.errorbar(xs, np.sum(self.results.pfs, axis=1), yerr=tots,
                                    label="Block protection factor +/- std. err.", fmt='o', capsize=2, color=l[-1].get_color())
             ax.set_title("Total protection factors across trajectory (log-scaled)")
             ax.set_ylabel('Protection factor (log-scaled)')
@@ -1044,7 +1079,7 @@ class Plots():
             ax.set_xticks(xticknums)
             ax.set_xlim(0, self.results.c_n_frames[-1] * 1.05)
             ax.set_yscale('log')
-            ax.set_ylim(10**np.floor(np.log10(np.max(np.sum(self.results.pfs, axis=1)))), \
+            ax.set_ylim(10**np.floor(np.log10(np.max(np.sum(self.results.pfs, axis=1)))),
                         10**np.ceil(np.log10(np.max(np.sum(self.results.pfs, axis=1))))) 
             ax.legend()
             fig.tight_layout() # No fig.suptitle = default figure coords
@@ -1147,7 +1182,7 @@ class Plots():
 
     def run(self, **plot_overrides):
         self.choose_plots(**plot_overrides)
-        for key, val in self.avail.iteritems():
+        for key, val in self.avail.items():
             if val:
                 try:
                     self._funcdict[key]()

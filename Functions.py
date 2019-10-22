@@ -2,8 +2,6 @@
 
 # Transferable functions for HDX analysis
 
-from __future__ import print_function
-from __future__ import division
 #
 import mdtraj as md
 import numpy as np
@@ -74,11 +72,12 @@ def itertraj_slice(gen, chunk, end, stride=1):
     end = int(end) # floor
     while yielded_frames + chunk < end:
         yielded_frames += chunk
-        x = gen.next()
+        x = next(gen)
         yield x
-    x = gen.next()
+    x = next(gen)
     yield x[:(end - yielded_frames)]
-    raise StopIteration
+    #raise StopIteration # RuntimeError in 3.7+
+    return
 
 def select(traj, selection):
     """Strips a trajectory based on the MDTraj-format text selection
@@ -110,7 +109,7 @@ def list_prolines(traj, log="HDX_analysis.log"):
         with open(log, 'a') as f:
             f.write("Prolines identified at resid:\n"+ \
                     "%s\n" % ' '.join(str(i) for i in prolist))
-        return np.asarray(zip(prolist, proidx))
+        return np.asarray(list(zip(prolist, proidx)))
     else:
         with open(log, 'a') as f:
             f.write("No prolines found in topology.\n")
@@ -167,9 +166,9 @@ def extract_HN(traj, prolines=None, atomselect="(name H or name HN)", log="HDX_a
 
 ### Switching functions for contacts etc. calculation
 ### 'Sigmoid': y = 1 / [ 1 + exp( -k * (x - d0) ) ]
-def sigmoid(x, k=1, d0=0):
+def sigmoid(x, k=1., d0=0):
     denom = 1 + np.exp( k * (x - d0) )
-    return 2/denom # Height 2 as d0 = midpoint of sigmoid
+    return 1./denom # Height 1 = d0 @ midpoint 0.5 contacts, Height 2 = d0 @ midpoint 1.0 contacts
 
 ### 'Rational_6_12': y = [ 1 - ( (x - d0) / x0 ) ** n ] / [ 1 - ( (x - d0) / x0 ) ** m ]
 def rational_6_12(x, k, d0=0, n=6, m=12):
@@ -203,7 +202,7 @@ def cacheobj(cachefn=None):
                     print("Read cache from file %s\n" % fn)
                 return cached_obj
 
-            except (KeyError, IOError, EOFError, TypeError):
+            except (KeyError, FileNotFoundError, EOFError, TypeError):
                 new_obj = func(*args, **kwargs)
             pickle.dump(args[0], open(fn,'wb'), protocol=-1) # Highest protocol for size purposes
             try:

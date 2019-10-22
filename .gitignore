@@ -2,3 +2,4 @@
 examples/*
 Protection_Factors_PH2.py
 .spyproject/*
+__pycache__/*

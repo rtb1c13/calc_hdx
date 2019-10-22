@@ -6,13 +6,11 @@
 # For help/usage instructions: calc_hdx.py -h
 #
 #
-# Python 3 compatibilities
-from __future__ import print_function
-from __future__ import division
 # Dependencies
 import mdtraj as md
 import sys, ast
 import argparse
+from functools import reduce
 # 
 import Functions, Methods, Analysis
 
@@ -62,7 +60,7 @@ def _get_method(name):
     return methods[name.lower()]
     
 def _update_options(opts, **updates):
-    """Updates options dictionary with extra kwargs"""
+    """Update options dictionary with extra kwargs"""
     opts.update(updates)
 
 def predict(traj, method, mopts, aopts, saveprefix=None):
@@ -134,7 +132,7 @@ def chunks(trajlist, parm, start, stop, stride, select, chunksize, method, mopts
         t_gen = Functions.load_trajchunks(t, parm=parm, start=start, stride=stride, chunk=chunksize)
         f_to_yield = final_frame - (start - 1)
         # Sums generator with __add__ of desired method
-        fulllist.append(reduce(combine_results, \
+        fulllist.append(reduce(combine_results,
                                (predict(Functions.select(t_chunk, select), method, mopts, aopts, saveprefix) for t_chunk in \
                                Functions.itertraj_slice(t_gen, chunksize, f_to_yield, stride=stride))))
     
@@ -154,31 +152,31 @@ if __name__ == '__main__':
         f.write("Command-line arguments: "+' '.join(i for i in sys.argv)+'\n')
     ### Set up options
     if args.method_options is not None:
-        _update_options(args.method_options, logfile=args.logfile, \
-                        segfile=args.segfile, outprefix=args.outprefix,\
+        _update_options(args.method_options, logfile=args.logfile,
+                        segfile=args.segfile, outprefix=args.outprefix,
                         times=args.times)
     else:
         args.method_options = {}
-        _update_options(args.method_options, logfile=args.logfile, \
-                        segfile=args.segfile, outprefix=args.outprefix,\
+        _update_options(args.method_options, logfile=args.logfile,
+                        segfile=args.segfile, outprefix=args.outprefix,
                         times=args.times)
     if args.analysis_options is not None:
-        _update_options(args.analysis_options, logfile=args.logfile, \
-                        segfile=args.segfile, expfile=args.expfile, \
+        _update_options(args.analysis_options, logfile=args.logfile,
+                        segfile=args.segfile, expfile=args.expfile,
                         outprefix=args.outprefix, times=args.times)
     else:
         args.analysis_options = {}
-        _update_options(args.analysis_options, logfile=args.logfile, \
+        _update_options(args.analysis_options, logfile=args.logfile,
                         segfile=args.segfile, expfile=args.expfile,
                         outprefix=args.outprefix, times=args.times)
     # Prediction & creation of analysis objects
     if args.chunks is not None:
-        results, analysis = chunks(args.traj, args.parm, args.start, args.end,\
-                         args.stride, args.select, args.chunks,\
+        results, analysis = chunks(args.traj, args.parm, args.start, args.end,
+                         args.stride, args.select, args.chunks,
                          args.method, args.method_options, args.analysis_options, saveprefix='results')
     else:
-        results, analysis = full(args.traj, args.parm, args.start, args.end,\
-                       args.stride, args.select, args.method,\
+        results, analysis = full(args.traj, args.parm, args.start, args.end,
+                       args.stride, args.select, args.method,
                        args.method_options, args.analysis_options, saveprefix='results')
     # Automatic basic plotting
     if args.chunks is not None:
