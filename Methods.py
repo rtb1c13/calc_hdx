@@ -185,18 +185,16 @@ class Radou(DfPred.DfPredictor):
 
     def _calc_hbonds_contacts(self, HN):
         """Calculates number of protein H-bonds for a particular atom index
-           using the 'contacts' method. Bonds to all protein O* or N* evaluated
+           using the 'contacts' method. Bonds to all protein O* evaluated
            by default, optionally all non-protein too (including waters) if 
            Radou.params['protonly'] is False.
        
            Usage: _calc_hbonds_contacts(atom)"""
 
-        # Get N index in same residue as current HN atom
-        getN4H = lambda _: self.top.atom(_).residue.atom('N').index
         if self.params['protonly']:
-            c = self.top.select("protein and (symbol O or symbol N) and not index %s" % getN4H(HN))
+            c = self.top.select("protein and symbol O")
         else:
-            c = self.top.select("(symbol O or symbol N) and not index %s" % getN4H(HN))
+            c = self.top.select("symbol O")
 
         if self.params['contact_method'] == 'switch':
             hbond_counts = self.calc_contacts(HN, c, self.params['cut_Nh'], self.params['switch_scale_Nh'])
@@ -209,18 +207,18 @@ class Radou(DfPred.DfPredictor):
            using the 'Baker-Hubbard' method. Default donor-acceptor distance < 0.25 nm
            + angle > 120 degrees in Radou.params.
            Reports all H-bonds (minimum freq=0.0) by default. Bonds to all protein 
-           O* or N* evaluated by default, optionally all non-protein too 
+           O* evaluated by default, optionally all non-protein too 
            (including waters) if Radou.params['protonly'] is False.
        
            Usage: _calc_hbonds_bh(atom, [minfreq])
            Returns: n_frames length array of H-bond counts for desired atom"""
 
-        # Atoms for H-bonds includes protein or all O*, N* and single HN hydrogen
+        # Atoms for H-bonds includes protein or all O* and single HN hydrogen
 
         if self.params['protonly']:
-            c = self.t.atom_slice(self.top.select("protein and (symbol O or symbol N) or index %s" % HN))
+            c = self.t.atom_slice(self.top.select("(protein and symbol O) or index %s" % HN))
         else:
-            c = self.t.atom_slice(self.top.select("(symbol O or symbol N) or index %s" % HN))
+            c = self.t.atom_slice(self.top.select("symbol O or index %s" % HN))
 
         # Call internal functions of md.baker_hubbard directly to return
         # distances & angles, otherwise only bond_triplets averaged across
