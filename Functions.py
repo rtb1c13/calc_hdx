@@ -90,7 +90,10 @@ def select(traj, selection):
 #    try:
     atms = traj.topology.select(selection)
     new_t = traj.atom_slice(atms)
-    new_t.topology = traj.topology.subset(atms)
+    # Workaround as atom indices are not renumbered in mdtraj.Topology.subset
+    # But are in mdtraj.Topology.copy
+    _tmptop = traj.topology.subset(atms)
+    new_t.topology = _tmptop.copy()
     return new_t
 #    except (ValueError, AttributeError):
 #        raise HDX_Error("Your selection of trajectory atoms hasn't been parsed properly - check the syntax")
@@ -192,7 +195,6 @@ def cacheobj(cachefn=None):
         def pickle_wrapped_func(*args,**kwargs):
             try:
                 fn = args[0].params['outprefix'] + kwargs.pop('cachefn')
-
                 cached_obj = pickle.load(open(fn,'rb'))
                 try:
                     # args[0] is 'self' for class methods
