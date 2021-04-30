@@ -342,10 +342,10 @@ class Radou(DfPred.DfPredictor):
         # Check all hn_atoms are from protein residues except prolines
         if prolines is not None:
             reslist = [ self.top.atom(a).residue.index for a in all_hn_atms if self.top.atom(a).residue.is_protein and self.top.atom(a).residue.index not in prolines[:,1] ]
-            prot_hn_atms = np.array([ self.top.atom(a).residue.index for a in all_hn_atms if self.top.atom(a).residue.is_protein and self.top.atom(a).residue.index not in prolines[:,1] ])
+            prot_hn_atms = np.array([ a for a in all_hn_atms if self.top.atom(a).residue.is_protein and self.top.atom(a).residue.index not in prolines[:,1] ])
         else:
             reslist = [ self.top.atom(a).residue.index for a in all_hn_atms if self.top.atom(a).residue.is_protein ]
-            prot_hn_atms = np.array([ self.top.atom(a).residue.index for a in all_hn_atms if self.top.atom(a).residue.is_protein ])
+            prot_hn_atms = np.array([ a for a in all_hn_atms if self.top.atom(a).residue.is_protein ])
 
         # Calc Nc/Nh
         hres, hbonds = self.calc_hbonds(prot_hn_atms)
