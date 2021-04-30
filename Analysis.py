@@ -594,7 +594,7 @@ class Analyze():
         return self # For consistency with pickle
 
 
-### Analysis object for multiple runs
+### Analysis object for multiple runs (Not yet implemented!)
 class MultiAnalyze():
     """Class to contain results and analysis methods for HDX predictions"""
 
@@ -629,9 +629,11 @@ class Plots():
            Available plots:
            df_curves : By-segment deuterated fractions for all timepoints
            df_convergence : Convergence of by-segment deuterated fractions across all simulation chunks
-           seg_curves : By-segment predictions across all timepoints
+           seg_curve : By-segment predictions across all timepoints
            pf_byres : By-residue protection factors
            tot_pf   : Convergence of total protection factor across all simulation chunks
+           pf_error : Convergence of standard errors in total protection factor, with respect to block size.
+           switch_func : Shape of switching function if a switching function is used
            _expt_overlay : Option to switch on/off overlay of experimental values on all relevant plots
            _block_ave : Option to switch on/off block averaging plots as well as convergence (running ave) (currently unused)
 
@@ -643,6 +645,7 @@ class Plots():
                        'pf_byres' : False,
                        'tot_pf' : False,
                        'pf_error' : False,
+                       'switch_func' : False,
                        '_expt_overlay' : False,
                        '_block_ave' : False } # Currently unused
 
@@ -651,7 +654,11 @@ class Plots():
                            'seg_curve' : self.seg_curve,
                            'pf_byres' : self.pf_byres,
                            'tot_pf' : self.tot_pf,
-                           'pf_error' : self.pf_error }
+                           'pf_error' : self.pf_error, 
+                           'switch_func' : self.switch_func }
+
+        if self.results.resobj.params['contact_method'] == 'switch': # No need for try/except as contact_method should always exist
+            self.avail['switch_func'] = True
         try:
             self.results.c_resfracs[-1]
             self.avail['df_curve'] = True
@@ -1127,6 +1134,52 @@ class Plots():
             pdf.savefig(fig)
             plt.close()
         
+    def switch_func(self):
+        """Plot shape of switching function used for contacts and/or H-bonds
+           
+           Plots are saved to a multi-page PDF file switching_function.pdf""" 
+        smethods = {
+                    'rational_6_12' : Functions.rational_6_12,
+                    'sigmoid' : Functions.sigmoid,
+                    'exponential' : Functions.exponential,
+                    'gaussian' : Functions.gaussian
+                   }
+
+
+        # Work out what needs to be added:
+        if type(self.results.resobj) == Methods.Radou:
+            do_switch = lambda x: smethods[self.results.resobj.params['switch_method']](x, self.results.resobj.params['switch_scale'], self.results.resobj.params['cut_Nc'])
+            cutoff_names = ['cut_Nc']
+        if type(self.results.resobj) == Methods.PH:
+            do_switch = lambda x: smethods[self.results.resobj.params['switch_method']](x, self.results.resobj.params['switch_scale'], self.results.resobj.params['cut_O'])
+            cutoff_names = ['cut_O']
+
+        with PdfPages(self.results.params['outprefix']+"switching_function.pdf") as pdf:
+            for cutoff_name in cutoff_names:
+                fig = plt.figure(figsize=(11, 8.5)) # Letter
+                ax = fig.gca()
+                xs = np.arange(0, \
+                               self.results.resobj.params[cutoff_name] + self.results.resobj.params['switch_width'] + 0.2, \
+                               0.005)
+                switch_ys = do_switch(xs)
+                lowx_idx = int(np.where(xs == self.results.resobj.params[cutoff_name])[0])
+                switch_ys[:lowx_idx+1] = 1
+                highx_idx = int(np.where(xs == self.results.resobj.params[cutoff_name] + self.results.resobj.params['switch_width'])[0])
+                switch_ys[highx_idx+1:] = 0
+                
+                ax.plot(xs, switch_ys, label="Contact value")
+                ax.set_title("Switching function for contacts with cutoff defined by %s" % cutoff_name)
+                ax.set_ylabel('Contribution to contact count')
+                ax.set_xlabel("Distance / nm")
+#            ax.xaxis.set_major_locator(MaxNLocator(nbins='auto', steps=[1, 2, 5, 10]))
+#            xticknums = self._fix_ticks(ax.get_xticks(), xs[-1], 100)
+#            ax.set_xticks(xticknums)
+#            ax.set_xlim(0, (self.results.c_n_frames[-1] / 2) * 1.05)
+                ax.legend()
+                fig.tight_layout() # No fig.suptitle = default figure coords
+                pdf.savefig(fig)
+                plt.close()
+
     def run(self, **plot_overrides):
         self.choose_plots(**plot_overrides)
         for key, val in self.avail.items():
